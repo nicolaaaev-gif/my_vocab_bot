@@ -382,6 +382,7 @@ def get_more_keyboard():
         [InlineKeyboardButton("🗣️ Диалог", callback_data="menu_dialogue")],
         [InlineKeyboardButton("🔴 Слабые слова", callback_data="menu_weak")],
         [InlineKeyboardButton("📈 Прогресс", callback_data="menu_progress")],
+        [InlineKeyboardButton("🔄 Сброс learning", callback_data="menu_reset_learning")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu_back")]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -487,6 +488,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await weak_words(update, context)
     elif data == "menu_progress":
         await progress(update, context)
+    elif data == "menu_reset_learning":
+        await reset_learning(update, context)
     elif data.startswith("learn_"):
         await learn_button_handler(update, context)
 
@@ -537,6 +540,7 @@ async def daily_words(update, context):
         w["learned_at"] = datetime.now().isoformat()
     save_words(words)
     
+    # Отправляем отдельное сообщение о генерации
     await update.message.reply_text("🧠 Генерирую примеры предложений для новых слов... Подожди немного.")
     
     examples = generate_examples_for_words(selected)
@@ -555,15 +559,10 @@ async def daily_words(update, context):
     
     parts = split_text(text, 4000)
     for part in parts:
-        if update.callback_query:
-            await update.callback_query.message.reply_text(part, parse_mode="Markdown")
-        else:
-            await update.message.reply_text(part, parse_mode="Markdown")
+        await update.message.reply_text(part, parse_mode="Markdown")
     
-    if update.callback_query:
-        await update.callback_query.message.reply_text("Выбери действие:", reply_markup=get_main_keyboard())
-    else:
-        await update.message.reply_text("Выбери действие:", reply_markup=get_main_keyboard())
+    # Отдельное сообщение с меню
+    await update.message.reply_text("Выбери действие:", reply_markup=get_main_keyboard())
 
 # === КОМАНДА: СТАТИСТИКА ===
 async def stats(update, context):
@@ -651,6 +650,37 @@ async def weak_words(update, context):
         await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
     else:
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
+
+# === КОМАНДА: СБРОС LEARNING ===
+async def reset_learning(update, context):
+    """Сбрасывает все слова из статуса LEARNING в NEW"""
+    uid = str(update.effective_user.id)
+    
+    learning_words = get_words_by_status("learning")
+    if not learning_words:
+        text = "📭 Нет слов в статусе learning.\n\nВсе слова уже в new или на других этапах."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+        else:
+            await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+        return
+    
+    count = 0
+    for w in words:
+        if w.get("status") == "learning":
+            w["status"] = "new"
+            w["learned_at"] = None
+            count += 1
+    save_words(words)
+    
+    text = f"✅ *{count} слов возвращены в статус NEW!*\n\n"
+    text += f"Теперь ты можешь взять их заново через `/daily_words`.\n\n"
+    text += f"💡 *Совет:* не бери слишком много слов за раз — 5-10 в день оптимально."
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 # === КОМАНДА: ТРЕНИРОВКА (/learn) ===
 async def learn(update, context):
@@ -1179,6 +1209,7 @@ def main():
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CommandHandler("on", toggle))
     app.add_handler(CommandHandler("off", toggle))
+    app.add_handler(CommandHandler("reset_learning", reset_learning))
 
     app.add_handler(CallbackQueryHandler(button_handler))
 
@@ -1195,6 +1226,7 @@ def main():
     print("🗣️ /dialogue — диалог на IT-тему")
     print("🔴 /weak — топ ошибок")
     print("📈 /progress — прогресс по дням")
+    print("🔄 /reset_learning — сброс всех слов из learning в new")
     print("🎯 /status слово — status (new/learning/review_1/review_2/review_3/mastered)")
     print("⏰ Ежедневная рассылка в 09:00")
     print("🔘 Кнопки доступны в /start")
