@@ -540,7 +540,6 @@ async def daily_words(update, context):
         w["learned_at"] = datetime.now().isoformat()
     save_words(words)
     
-    # Определяем, откуда пришёл вызов
     if update.callback_query:
         await update.callback_query.message.reply_text("🧠 Генерирую примеры предложений для новых слов... Подожди немного.")
         target = update.callback_query.message
@@ -728,7 +727,8 @@ async def learn(update, context):
         "hint_used": False,
         "waiting_for_answer": True,
         "current_card_idx": 0,
-        "last_message_id": None
+        "last_message_id": None,
+        "current_message_id": None
     }
     
     if update.callback_query:
@@ -786,13 +786,12 @@ async def show_learn_card(update, uid):
     
     keyboard = get_learn_keyboard(uid, idx)
     
-    # Сохраняем ID сообщения, чтобы потом можно было его удалить при пропуске
     if update.callback_query:
         msg = await update.callback_query.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
     else:
         msg = await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
     
-    session["last_message_id"] = msg.message_id
+    session["current_message_id"] = msg.message_id
 
 async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -814,6 +813,7 @@ async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             direction = session["direction"]
             hint = get_hint(card["word"], direction)
             await query.message.reply_text(hint)
+            await query.answer("💡 Подсказка отправлена!")
         else:
             await query.answer("Это слово уже пройдено.")
     
@@ -834,6 +834,8 @@ async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             session["index"] += 1
             session["waiting_for_answer"] = False
             
+            await query.answer("⏭️ Пропущено!")
+            
             # Удаляем сообщение с карточкой
             try:
                 await query.message.delete()
@@ -841,6 +843,8 @@ async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
             
             await query.message.reply_text("⏭️ Пропущено. Перехожу к следующему...")
+            
+            # Обновляем контекст для следующей карточки
             await show_learn_card(update, uid)
         else:
             await query.answer("Это слово уже пройдено.")
@@ -894,6 +898,14 @@ async def handle_learn_answer(update, context):
     
     session["index"] += 1
     session["waiting_for_answer"] = False
+    
+    # Удаляем сообщение с карточкой
+    try:
+        if session.get("current_message_id"):
+            await update.message.delete()
+    except:
+        pass
+    
     await show_learn_card(update, uid)
 
 async def finish_learn_session(update, uid):
@@ -992,7 +1004,8 @@ async def repeat_errors(update, context):
         "waiting_for_answer": True,
         "current_card_idx": 0,
         "is_repeat": True,
-        "last_message_id": None
+        "last_message_id": None,
+        "current_message_id": None
     }
     
     await query.edit_message_text("🔄 *Повторяем только слова с ошибками!*\n\nБудь внимателен!", parse_mode="Markdown")
