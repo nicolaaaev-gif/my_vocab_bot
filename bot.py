@@ -115,9 +115,9 @@ def get_hint(word, direction):
     en_part = word.split(" — ")[0]
     ru_part = word.split(" — ")[1]
     if direction == "ru_to_en":
-        return f"💡 Подсказка: слово начинается с '{en_part[0].upper()}'... связано с изменением направления"
+        return f"💡 Подсказка: слово начинается с '{en_part[0].upper()}' и связано с изменением направления"
     else:
-        return f"💡 Подсказка: слово начинается с '{ru_part[0].upper()}'... переводится как 'разворот'"
+        return f"💡 Подсказка: слово начинается с '{ru_part[0].upper()}' и переводится как 'разворот'"
 
 def update_word_status(word_text, new_status, set_review_date=True):
     for w in words:
@@ -542,11 +542,9 @@ async def daily_words(update, context):
     
     # Определяем, откуда пришёл вызов
     if update.callback_query:
-        # Это кнопка — отправляем новое сообщение, а не редактируем старое
         await update.callback_query.message.reply_text("🧠 Генерирую примеры предложений для новых слов... Подожди немного.")
         target = update.callback_query.message
     else:
-        # Это команда из чата
         await update.message.reply_text("🧠 Генерирую примеры предложений для новых слов... Подожди немного.")
         target = update.message
     
@@ -568,10 +566,8 @@ async def daily_words(update, context):
     for part in parts:
         await target.reply_text(part, parse_mode="Markdown")
     
-    # Отдельное сообщение с меню
     await target.reply_text("Выбери действие:", reply_markup=get_main_keyboard())
     
-    # Если это была кнопка — редактируем исходное сообщение, чтобы убрать индикатор загрузки
     if update.callback_query:
         await update.callback_query.edit_message_text("✅ Новые слова добавлены в обучение!", reply_markup=get_main_keyboard())
 
@@ -731,7 +727,8 @@ async def learn(update, context):
         "errors": [],
         "hint_used": False,
         "waiting_for_answer": True,
-        "current_card_idx": 0
+        "current_card_idx": 0,
+        "last_message_id": None
     }
     
     if update.callback_query:
@@ -789,10 +786,13 @@ async def show_learn_card(update, uid):
     
     keyboard = get_learn_keyboard(uid, idx)
     
+    # Сохраняем ID сообщения, чтобы потом можно было его удалить при пропуске
     if update.callback_query:
-        await update.callback_query.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        msg = await update.callback_query.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
     else:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        msg = await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    
+    session["last_message_id"] = msg.message_id
 
 async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -806,7 +806,7 @@ async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     session = sessions[uid]
     
     if data.startswith("learn_hint_"):
-        # Подсказка
+        # Подсказка — отправляем новым сообщением
         parts = data.split("_")
         idx = int(parts[2])
         if idx == session["index"]:
@@ -818,7 +818,7 @@ async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.answer("Это слово уже пройдено.")
     
     elif data.startswith("learn_skip_"):
-        # Пропустить
+        # Пропустить — удаляем текущее сообщение и показываем следующее
         parts = data.split("_")
         idx = int(parts[2])
         if idx == session["index"]:
@@ -833,7 +833,14 @@ async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             session["errors"].append(word_text)
             session["index"] += 1
             session["waiting_for_answer"] = False
-            await query.edit_message_text("⏭️ Пропущено. Перехожу к следующему...")
+            
+            # Удаляем сообщение с карточкой
+            try:
+                await query.message.delete()
+            except:
+                pass
+            
+            await query.message.reply_text("⏭️ Пропущено. Перехожу к следующему...")
             await show_learn_card(update, uid)
         else:
             await query.answer("Это слово уже пройдено.")
@@ -896,7 +903,6 @@ async def finish_learn_session(update, uid):
     session = sessions[uid]
     results = session.get("results", [])
     errors = session.get("errors", [])
-    cards = session.get("cards", [])
     
     total = len(results)
     correct = len([r for r in results if r["correct"]])
@@ -985,7 +991,8 @@ async def repeat_errors(update, context):
         "hint_used": False,
         "waiting_for_answer": True,
         "current_card_idx": 0,
-        "is_repeat": True
+        "is_repeat": True,
+        "last_message_id": None
     }
     
     await query.edit_message_text("🔄 *Повторяем только слова с ошибками!*\n\nБудь внимателен!", parse_mode="Markdown")
