@@ -497,6 +497,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_skip(update, context)
     elif data.startswith("stop_"):
         await handle_stop(update, context)
+    elif data.startswith("learn_repeat_errors_"):
+        await repeat_errors(update, context)
+    elif data.startswith("learn_done_"):
+        await finish_learn_session(update, uid)
 
 # === ОБРАБОТЧИКИ КНОПОК ОБУЧЕНИЯ ===
 
@@ -542,7 +546,6 @@ async def handle_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     card = cards[idx]
     word_text = card["word"].split(" — ")[0]
     
-    # Сохраняем результат
     session["results"].append({
         "word": word_text,
         "correct": False,
@@ -555,7 +558,6 @@ async def handle_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.answer("⏭️ Пропущено!")
     
-    # Удаляем сообщение с карточкой и показываем следующую
     try:
         await query.message.delete()
     except:
@@ -822,17 +824,21 @@ async def show_learn_card(update, uid):
     cards = session["cards"]
     direction = session["direction"]
     
+    # Если дошли до конца списка в текущем направлении
     if idx >= len(cards):
         if direction == "ru_to_en":
+            # Переключаем на обратный перевод
             session["direction"] = "en_to_ru"
             session["index"] = 0
             if update.callback_query:
                 await update.callback_query.message.reply_text("🔄 Теперь АНГЛИЙСКИЙ → РУССКИЙ")
             else:
                 await update.message.reply_text("🔄 Теперь АНГЛИЙСКИЙ → РУССКИЙ")
+            # Рекурсивно показываем первую карточку нового направления
             await show_learn_card(update, uid)
             return
         else:
+            # Оба направления пройдены — завершаем сессию
             await finish_learn_session(update, uid)
             return
     
@@ -921,6 +927,11 @@ async def handle_learn_answer(update, context):
 
 async def finish_learn_session(update, uid):
     if uid not in sessions:
+        # Если сессии уже нет, просто показываем главное меню
+        if update.callback_query:
+            await update.callback_query.edit_message_text("Сессия завершена. Выбери действие:", reply_markup=get_main_keyboard())
+        else:
+            await update.message.reply_text("Сессия завершена. Выбери действие:", reply_markup=get_main_keyboard())
         return
     
     session = sessions[uid]
@@ -960,21 +971,25 @@ async def finish_learn_session(update, uid):
         if len(set(errors)) > 10:
             text += f"... и ещё {len(set(errors)) - 10} слов\n"
         
-        text += f"\n❓ Хочешь повторить только эти слова?"
+        # Предлагаем повторить ошибки
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Да, повторить ошибки", callback_data=f"learn_repeat_errors_{uid}")],
             [InlineKeyboardButton("✅ Закончить", callback_data=f"learn_done_{uid}")]
         ])
         
+        # Сохраняем сессию, но помечаем, что она завершена (чтобы кнопка повтора работала)
+        session["finished"] = True
         if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
         return
     
+    # Если ошибок нет — просто завершаем
     text += "\n\n🎉 Отличная работа! Ты прошёл все слова!"
-    del sessions[uid]
+    del sessions[uid]  # Удаляем сессию
     
+    # Возвращаем в главное меню
     if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
     else:
