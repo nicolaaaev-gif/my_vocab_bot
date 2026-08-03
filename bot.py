@@ -112,13 +112,12 @@ def find_translation(word_text):
     return None
 
 def get_hint(word, direction):
-    """Возвращает подсказку для слова: первую букву или контекст"""
     en_part = word.split(" — ")[0]
     ru_part = word.split(" — ")[1]
     if direction == "ru_to_en":
-        return f"💡 Подсказка: слово начинается с буквы '{en_part[0].upper()}' ..."
+        return f"💡 Подсказка: слово начинается с '{en_part[0].upper()}'... связано с изменением направления"
     else:
-        return f"💡 Подсказка: слово начинается с буквы '{ru_part[0].upper()}' ..."
+        return f"💡 Подсказка: слово начинается с '{ru_part[0].upper()}'... переводится как 'разворот'"
 
 def update_word_status(word_text, new_status, set_review_date=True):
     for w in words:
@@ -172,8 +171,35 @@ def get_words_for_practice(limit=10, difficulty=None):
     return random.sample(available, min(limit, len(available)))
 
 def get_learning_words():
-    """Возвращает список слов в статусе LEARNING для просмотра"""
     return get_words_by_status("learning")
+
+def generate_examples_for_words(word_entries):
+    if not word_entries:
+        return "Нет слов для генерации примеров."
+    
+    prompt = f"""
+    Для каждого из следующих слов напиши ровно 2 примера предложений на английском языке с переводом на русский.
+    Предложения должны быть из IT-сферы (Product Management, аналитика, разработка, менеджмент).
+    Слова: {', '.join([w['word'].split(' — ')[0] for w in word_entries])}
+
+    Формат вывода (строго соблюдай):
+    Слово: [слово]
+    1. [предложение на английском] — [перевод на русский]
+    2. [предложение на английском] — [перевод на русский]
+
+    Повтори этот блок для каждого слова.
+    """
+    
+    try:
+        response = deepseek_client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "user", "content": prompt}],
+            stream=False
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logging.error(f"Ошибка генерации примеров: {e}")
+        return None
 
 def generate_practice_sentences(word_entries, count=10, difficulty="medium"):
     if not word_entries:
@@ -199,7 +225,6 @@ def generate_practice_sentences(word_entries, count=10, difficulty="medium"):
         return "Ошибка генерации предложений."
 
 def generate_cloze(word_entries, count=3):
-    """Генерирует предложения с пропущенными словами (Cloze)"""
     if not word_entries:
         return "Недостаточно слов."
     selected = random.sample(word_entries, min(count, len(word_entries)))
@@ -266,16 +291,6 @@ def check_translation(user_word, correct_word):
         return response.choices[0].message.content
     except:
         return f"✅ Правильный ответ: {correct_word}"
-
-def check_cloze_answers(user_answer, correct_answers):
-    """Проверяет ответы на Cloze (упрощённо)"""
-    # Простая проверка: ищем слова в ответе
-    user_lower = user_answer.lower()
-    found = []
-    for word in correct_answers:
-        if word.lower() in user_lower:
-            found.append(word)
-    return found
 
 def check_sentences(user_message):
     prompt = f"""
@@ -371,14 +386,14 @@ def get_more_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-def get_learn_keyboard(can_hint=True):
-    keyboard = []
-    if can_hint:
-        keyboard.append([InlineKeyboardButton("💡 Подсказка", callback_data="learn_hint")])
-    keyboard.append([
-        InlineKeyboardButton("❌ Пропустить", callback_data="learn_skip"),
-        InlineKeyboardButton("⏹️ Закончить", callback_data="learn_stop")
-    ])
+def get_learn_keyboard(uid, idx):
+    keyboard = [
+        [InlineKeyboardButton("💡 Подсказка", callback_data=f"learn_hint_{uid}_{idx}")],
+        [
+            InlineKeyboardButton("❌ Пропустить", callback_data=f"learn_skip_{uid}_{idx}"),
+            InlineKeyboardButton("⏹️ Закончить", callback_data=f"learn_stop_{uid}")
+        ]
+    ]
     return InlineKeyboardMarkup(keyboard)
 
 # === ЕЖЕДНЕВНАЯ РАССЫЛКА ===
@@ -430,7 +445,10 @@ async def start(update, context):
     text += f"✅ Выучено: {len(get_words_by_status('mastered'))}\n\n"
     text += "Выбери действие:"
     
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 # === ОБРАБОТЧИК КНОПОК ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -471,8 +489,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await progress(update, context)
     elif data.startswith("learn_"):
         await learn_button_handler(update, context)
-    elif data.startswith("cloze_"):
-        await cloze_button_handler(update, context)
 
 # === КОМАНДА: ПОКАЗАТЬ СЛОВА В LEARNING ===
 async def show_learning_words(update, context):
@@ -485,7 +501,7 @@ async def show_learning_words(update, context):
             text += f"{i}. {w['word']}\n"
         text += f"\n📊 Всего: {len(learning_words)} слов"
     
-    if isinstance(update, Update) and update.callback_query:
+    if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -498,7 +514,7 @@ async def daily_words(update, context):
     
     if len(daily_taken) >= 10:
         text = "📚 Сегодня ты уже взял 10 слов для обучения!\nЗавтра будет новая порция. А пока потренируй уже взятые слова через `/learn`."
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -507,7 +523,7 @@ async def daily_words(update, context):
     new_words = get_words_by_status("new")
     if not new_words:
         text = "🎉 Поздравляю! У тебя нет новых слов. Добавь новые через `Добавь слово X — Y`"
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -521,16 +537,33 @@ async def daily_words(update, context):
         w["learned_at"] = datetime.now().isoformat()
     save_words(words)
     
+    await update.message.reply_text("🧠 Генерирую примеры предложений для новых слов... Подожди немного.")
+    
+    examples = generate_examples_for_words(selected)
+    
     text = f"📚 *Ты взял {len(selected)} новых слов для обучения:*\n\n"
     for i, w in enumerate(selected, 1):
         text += f"{i}. {w['word']}\n"
     text += f"\n📊 Сегодня уже взято: {len(daily_taken) + len(selected)}/10 слов.\n"
-    text += f"\n✍️ Теперь переходи в `/learn` чтобы начать тренировку!"
     
-    if isinstance(update, Update) and update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    if examples:
+        text += f"\n📝 *Примеры использования:*\n\n{examples}"
     else:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+        text += f"\n⚠️ Не удалось сгенерировать примеры. Попробуй позже."
+    
+    text += f"\n\n✍️ Теперь переходи в `/learn` чтобы начать тренировку!"
+    
+    parts = split_text(text, 4000)
+    for part in parts:
+        if update.callback_query:
+            await update.callback_query.message.reply_text(part, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(part, parse_mode="Markdown")
+    
+    if update.callback_query:
+        await update.callback_query.message.reply_text("Выбери действие:", reply_markup=get_main_keyboard())
+    else:
+        await update.message.reply_text("Выбери действие:", reply_markup=get_main_keyboard())
 
 # === КОМАНДА: СТАТИСТИКА ===
 async def stats(update, context):
@@ -550,7 +583,7 @@ async def stats(update, context):
     text += f"✅ Выучено: {mastered_count}\n"
     text += f"📚 Всего слов: {len(words)}"
     
-    if isinstance(update, Update) and update.callback_query:
+    if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -560,7 +593,7 @@ async def progress(update, context):
     learned_words = get_words_by_statuses(["learning", "review_1", "review_2", "review_3", "mastered"])
     if not learned_words:
         text = "📈 У тебя пока нет слов в обучении. Начни с /daily_words!"
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
@@ -574,7 +607,7 @@ async def progress(update, context):
     
     if not daily_counts:
         text = "Нет данных для прогресса."
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
@@ -592,7 +625,7 @@ async def progress(update, context):
     graph += f"\n📊 Всего слов в работе: {total}\n"
     graph += f"📊 В среднем в день: {avg:.1f}"
     
-    if isinstance(update, Update) and update.callback_query:
+    if update.callback_query:
         await update.callback_query.edit_message_text(graph, parse_mode="Markdown", reply_markup=get_more_keyboard())
     else:
         await update.message.reply_text(graph, parse_mode="Markdown", reply_markup=get_more_keyboard())
@@ -602,7 +635,7 @@ async def weak_words(update, context):
     error_words = [w for w in words if w.get("error_count", 0) > 0]
     if not error_words:
         text = "🔴 Отлично! У тебя нет слов, в которых ты часто ошибаешься."
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
@@ -614,7 +647,7 @@ async def weak_words(update, context):
         text += f"{i}. {w['word']} — ошибок: {w.get('error_count', 0)}\n"
     text += "\nИспользуй `/status слово — learning` чтобы вернуть слово в обучение."
     
-    if isinstance(update, Update) and update.callback_query:
+    if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
     else:
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
@@ -623,7 +656,7 @@ async def weak_words(update, context):
 async def learn(update, context):
     uid = update.effective_user.id
     if uid in sessions:
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text("У тебя уже есть активная сессия.", reply_markup=get_main_keyboard())
         else:
             await update.message.reply_text("У тебя уже есть активная сессия.", reply_markup=get_main_keyboard())
@@ -632,7 +665,7 @@ async def learn(update, context):
     cards = get_words_for_learn(10)
     if not cards:
         text = "📚 Нет слов для тренировки.\nСначала возьми новые слова через `/daily_words`"
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -653,14 +686,14 @@ async def learn(update, context):
         "cards": cards,
         "index": 0,
         "direction": "ru_to_en",
-        "results": [],  # [{word, correct, user_answer, correct_answer}]
+        "results": [],
         "errors": [],
         "hint_used": False,
         "waiting_for_answer": True,
         "current_card_idx": 0
     }
     
-    if isinstance(update, Update) and update.callback_query:
+    if update.callback_query:
         await update.callback_query.edit_message_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -680,14 +713,13 @@ async def show_learn_card(update, uid):
         if direction == "ru_to_en":
             session["direction"] = "en_to_ru"
             session["index"] = 0
-            if isinstance(update, Update) and update.callback_query:
-                await update.callback_query.message.reply_text("🔄 Теперь АНГЛИЙСКИЙ → РУССКИЙ", reply_markup=get_main_keyboard())
+            if update.callback_query:
+                await update.callback_query.message.reply_text("🔄 Теперь АНГЛИЙСКИЙ → РУССКИЙ")
             else:
-                await update.message.reply_text("🔄 Теперь АНГЛИЙСКИЙ → РУССКИЙ", reply_markup=get_main_keyboard())
+                await update.message.reply_text("🔄 Теперь АНГЛИЙСКИЙ → РУССКИЙ")
             await show_learn_card(update, uid)
             return
         else:
-            # Завершаем сессию
             await finish_learn_session(update, uid)
             return
     
@@ -702,7 +734,7 @@ async def show_learn_card(update, uid):
         "review_1": "🔄 (3д)",
         "review_2": "🔄 (7д)",
         "review_3": "🔄 (14д)"
-    }.get(status, "❓")
+    }.get(status, "")
     
     if direction == "ru_to_en":
         text = f"{status_emoji} *{word_ru}*  ({idx+1}/{len(cards)})\n\n✍️ Напиши перевод на английский:"
@@ -714,16 +746,9 @@ async def show_learn_card(update, uid):
     session["waiting_for_answer"] = True
     session["current_card_idx"] = idx
     
-    # Кнопки: Подсказка, Пропустить, Закончить
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💡 Подсказка", callback_data=f"learn_hint_{uid}_{idx}")],
-        [
-            InlineKeyboardButton("❌ Пропустить", callback_data=f"learn_skip_{uid}_{idx}"),
-            InlineKeyboardButton("⏹️ Закончить", callback_data=f"learn_stop_{uid}")
-        ]
-    ])
+    keyboard = get_learn_keyboard(uid, idx)
     
-    if isinstance(update, Update) and update.callback_query:
+    if update.callback_query:
         await update.callback_query.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
     else:
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
@@ -747,8 +772,7 @@ async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             card = session["cards"][idx]
             direction = session["direction"]
             hint = get_hint(card["word"], direction)
-            await query.edit_message_text(hint, reply_markup=get_learn_keyboard(can_hint=False))
-            await query.message.reply_text("✍️ Теперь напиши перевод:")
+            await query.message.reply_text(hint)
         else:
             await query.answer("Это слово уже пройдено.")
     
@@ -762,7 +786,7 @@ async def learn_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             session["results"].append({
                 "word": word_text,
                 "correct": False,
-                "user_answer": "пропущено",
+                "user_answer": "⏭️ пропущено",
                 "correct_answer": session["current_correct"]
             })
             session["errors"].append(word_text)
@@ -801,7 +825,6 @@ async def handle_learn_answer(update, context):
     correct_answer = session["current_correct"]
     user_answer = text.strip()
     
-    # Проверяем ответ через DeepSeek
     feedback = check_translation(user_answer, correct_answer)
     is_correct = "✅" in feedback or "правильно" in feedback.lower()
     
@@ -814,7 +837,6 @@ async def handle_learn_answer(update, context):
     
     if not is_correct:
         session["errors"].append(word_text)
-        # Увеличиваем счётчик ошибок
         w = get_word_entry_by_text(word_text)
         if w:
             w["error_count"] = w.get("error_count", 0) + 1
@@ -843,7 +865,6 @@ async def finish_learn_session(update, uid):
     text += f"✅ Правильных: {correct}\n"
     text += f"❌ Ошибок: {wrong}\n"
     
-    # Слова, которые выучены (без ошибок)
     learned_words = []
     for r in results:
         if r["correct"]:
@@ -859,28 +880,32 @@ async def finish_learn_session(update, uid):
                 elif current_status in ["review_1", "review_2", "review_3"]:
                     next_status = NEXT_STATUS.get(current_status, "mastered")
                     update_word_status(word_text, next_status, True)
-        text += f"\n✅ Выучено слов: {len(learned_words)} (перешли на следующий этап)"
+        text += f"\n\n✅ Выучено слов: {len(learned_words)} (перешли на следующий этап)"
     
     if errors:
-        text += f"\n\n🔄 Слова с ошибками (остались в обучении):\n"
-        for word in errors[:5]:
+        text += f"\n\n🔄 *Слова с ошибками (остались в обучении):*\n"
+        error_list = list(set(errors))[:10]
+        for word in error_list:
             text += f"• {word}\n"
-        if len(errors) > 5:
-            text += f"... и ещё {len(errors) - 5} слов\n"
+        if len(set(errors)) > 10:
+            text += f"... и ещё {len(set(errors)) - 10} слов\n"
         
-        # Предложение повторить ошибки
         text += f"\n❓ Хочешь повторить только эти слова?"
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Да, повторить ошибки", callback_data=f"learn_repeat_errors_{uid}")],
             [InlineKeyboardButton("✅ Закончить", callback_data=f"learn_done_{uid}")]
         ])
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
         return
     
     text += "\n\n🎉 Отличная работа! Ты прошёл все слова!"
     del sessions[uid]
     
-    if isinstance(update, Update) and update.callback_query:
+    if update.callback_query:
         await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
     else:
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -894,12 +919,11 @@ async def repeat_errors(update, context):
         return
     
     session = sessions[uid]
-    error_words = session.get("errors", [])
+    error_words = list(set(session.get("errors", [])))
     if not error_words:
         await query.edit_message_text("Нет ошибок для повторения.", reply_markup=get_main_keyboard())
         return
     
-    # Находим полные записи слов по тексту
     error_cards = []
     for word_text in error_words:
         w = get_word_entry_by_text(word_text)
@@ -910,7 +934,6 @@ async def repeat_errors(update, context):
         await query.edit_message_text("Слова не найдены.", reply_markup=get_main_keyboard())
         return
     
-    # Создаём новую сессию только с ошибками
     sessions[uid] = {
         "mode": "learn",
         "cards": error_cards,
@@ -929,10 +952,9 @@ async def repeat_errors(update, context):
 
 # === КОМАНДА: ПОВТОРЕНИЕ (/review) ===
 async def review(update, context):
-    # Переиспользуем learn, но с ограничением только на review
     await learn(update, context)
 
-# === КОМАНДА: ПРАКТИКА (/practice) ===
+# === КОМАНДА: ПРАКТИКА ===
 async def practice(update, context):
     count = 5
     difficulty = "medium"
@@ -950,17 +972,15 @@ async def practice(update, context):
     words_for_practice = get_words_for_practice(count, difficulty)
     if not words_for_practice:
         text = f"📝 Нет выученных слов для практики (сложность {difficulty}).\nСначала выучи слова через /learn"
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
         return
     
-    # Генерируем Cloze
     await update.message.reply_text("⏳ Генерирую задания...")
     cloze_text = generate_cloze(words_for_practice, count)
     
-    # Разбиваем длинные сообщения
     parts = split_text(cloze_text, 4000)
     
     for part in parts:
@@ -973,7 +993,7 @@ async def dialogue(update, context):
     available = get_words_by_status("mastered") + get_words_by_statuses(["review_1", "review_2", "review_3"])
     if len(available) < 5:
         text = "🗣️ Недостаточно выученных слов для диалога. Выучи больше слов через /learn."
-        if isinstance(update, Update) and update.callback_query:
+        if update.callback_query:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
         else:
             await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_more_keyboard())
@@ -1061,12 +1081,10 @@ async def handle(update, context):
     uid = update.effective_user.id
     text = update.message.text
     
-    # Если есть активная сессия обучения — обрабатываем как ответ на карточку
     if uid in sessions and sessions[uid].get("mode") == "learn" and sessions[uid].get("waiting_for_answer", False):
         await handle_learn_answer(update, context)
         return
     
-    # Добавление слова
     add = detect_add_word(text)
     if add:
         word, trans, topic = add
@@ -1100,7 +1118,6 @@ async def handle(update, context):
         )
         return
     
-    # Поиск перевода (если пользователь написал слово)
     translation = find_translation(text)
     if translation:
         en, ru, full = translation
@@ -1112,7 +1129,6 @@ async def handle(update, context):
         )
         return
     
-    # Если больше 2 строк — возможно, переводы предложений
     if len(text.split('\n')) >= 2:
         await update.message.chat.send_action(action="typing")
         await update.message.reply_text("🔍 Проверяю переводы...")
@@ -1120,7 +1136,6 @@ async def handle(update, context):
         await update.message.reply_text(result, reply_markup=get_main_keyboard())
         return
     
-    # Обычный диалог
     await update.message.chat.send_action(action="typing")
     resp = ask_deepseek(uid, text)
     await update.message.reply_text(resp, reply_markup=get_main_keyboard())
@@ -1172,8 +1187,8 @@ def main():
     scheduler.add_job(send_daily_tasks, CronTrigger(hour=9, minute=0), id='daily')
 
     print("✅ Бот запущен!")
-    print("📚 /daily_words — взять 5 новых слов")
-    print("🧠 /learn — тренировка с ручным вводом")
+    print("📚 /daily_words — взять 5 новых слов с примерами")
+    print("🧠 /learn — тренировка с ручным вводом и кнопками")
     print("📋 /learning — список слов на обучении")
     print("🔄 /review — повторение")
     print("📝 /practice — практика Cloze")
