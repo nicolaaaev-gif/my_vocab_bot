@@ -540,8 +540,15 @@ async def daily_words(update, context):
         w["learned_at"] = datetime.now().isoformat()
     save_words(words)
     
-    # Отправляем отдельное сообщение о генерации
-    await update.message.reply_text("🧠 Генерирую примеры предложений для новых слов... Подожди немного.")
+    # Определяем, откуда пришёл вызов
+    if update.callback_query:
+        # Это кнопка — отправляем новое сообщение, а не редактируем старое
+        await update.callback_query.message.reply_text("🧠 Генерирую примеры предложений для новых слов... Подожди немного.")
+        target = update.callback_query.message
+    else:
+        # Это команда из чата
+        await update.message.reply_text("🧠 Генерирую примеры предложений для новых слов... Подожди немного.")
+        target = update.message
     
     examples = generate_examples_for_words(selected)
     
@@ -559,10 +566,14 @@ async def daily_words(update, context):
     
     parts = split_text(text, 4000)
     for part in parts:
-        await update.message.reply_text(part, parse_mode="Markdown")
+        await target.reply_text(part, parse_mode="Markdown")
     
     # Отдельное сообщение с меню
-    await update.message.reply_text("Выбери действие:", reply_markup=get_main_keyboard())
+    await target.reply_text("Выбери действие:", reply_markup=get_main_keyboard())
+    
+    # Если это была кнопка — редактируем исходное сообщение, чтобы убрать индикатор загрузки
+    if update.callback_query:
+        await update.callback_query.edit_message_text("✅ Новые слова добавлены в обучение!", reply_markup=get_main_keyboard())
 
 # === КОМАНДА: СТАТИСТИКА ===
 async def stats(update, context):
