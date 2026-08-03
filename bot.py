@@ -59,6 +59,22 @@ scheduler = AsyncIOScheduler()
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
+def split_text(text, max_length=4000):
+    """Разбивает длинный текст на части для отправки в Telegram"""
+    if len(text) <= max_length:
+        return [text]
+    parts = []
+    current = ""
+    for line in text.split('\n'):
+        if len(current) + len(line) + 1 > max_length:
+            parts.append(current)
+            current = line
+        else:
+            current += '\n' + line if current else line
+    if current:
+        parts.append(current)
+    return parts
+
 def get_words_by_status(status):
     return [w for w in words if w.get("status") == status]
 
@@ -74,7 +90,6 @@ def update_word_status_by_text(word_text, new_status):
             w["status"] = new_status
             if new_status == "learned":
                 w["learned_at"] = datetime.now().isoformat()
-                # Устанавливаем первое повторение через 1 день
                 w["next_review_date"] = (datetime.now() + timedelta(days=1)).isoformat()
                 w["interval"] = 1
             elif new_status == "review":
@@ -85,12 +100,10 @@ def update_word_status_by_text(word_text, new_status):
     return False
 
 def update_word_after_review(word_text, correct):
-    """Обновляет интервал повторения и дату следующего повторения"""
     w = get_word_entry_by_text(word_text)
     if not w:
         return
     if correct:
-        # Увеличиваем интервал: 1→3→7→14→30
         current_interval = w.get("interval", 1)
         if current_interval == 1:
             new_interval = 3
@@ -104,27 +117,22 @@ def update_word_after_review(word_text, correct):
             new_interval = 30
         w["interval"] = new_interval
         w["next_review_date"] = (datetime.now() + timedelta(days=new_interval)).isoformat()
-        w["error_count"] = w.get("error_count", 0)  # не увеличиваем ошибку
     else:
-        # Ошибка: сбрасываем интервал до 1 дня
         w["interval"] = 1
         w["next_review_date"] = (datetime.now() + timedelta(days=1)).isoformat()
         w["error_count"] = w.get("error_count", 0) + 1
     save_words(words)
 
 def get_topic_from_text(text):
-    """Извлекает тему из текста вида #agile"""
     match = re.search(r'#(\w+)', text)
     if match:
         return match.group(1).lower()
     return None
 
 def get_words_by_topic(topic):
-    """Возвращает слова, у которых в поле topics есть указанная тема"""
     return [w for w in words if topic in w.get("topics", [])]
 
 def get_daily_words(count=10, topic=None):
-    """Возвращает случайные слова из New, можно отфильтровать по теме"""
     if topic:
         pool = get_words_by_topic(topic)
         pool = [w for w in pool if w.get("status") == "new"]
@@ -137,7 +145,6 @@ def get_daily_words(count=10, topic=None):
     return random.sample(pool, count)
 
 def get_words_for_learn(limit=10, topic=None):
-    """Слова для обучения: сначала Learning, потом New, можно по теме"""
     if topic:
         pool = get_words_by_topic(topic)
         learning = [w for w in pool if w.get("status") == "learning"]
@@ -151,14 +158,12 @@ def get_words_for_learn(limit=10, topic=None):
     return random.sample(available, min(limit, len(available)))
 
 def get_words_for_review(limit=15):
-    """Возвращает слова, у которых next_review_date <= сегодня (сначала из review, потом learned)"""
     now = datetime.now()
     review_pool = get_words_by_status("review")
     learned_pool = get_words_by_status("learned")
     all_words = review_pool + learned_pool
     due_words = [w for w in all_words if w.get("next_review_date") and datetime.fromisoformat(w["next_review_date"]) <= now]
     if len(due_words) < limit:
-        # Если не хватает, добираем любыми learned с самой старой датой изучения
         learned_sorted = sorted([w for w in learned_pool if w not in due_words], key=lambda x: x.get("learned_at", "1970-01-01"))
         due_words += learned_sorted[:limit - len(due_words)]
     if not due_words:
@@ -166,7 +171,6 @@ def get_words_for_review(limit=15):
     return random.sample(due_words, min(limit, len(due_words)))
 
 def get_words_for_practice(limit=10, difficulty=None):
-    """Слова для практики: learned + review, можно отфильтровать по сложности"""
     learned = get_words_by_status("learned")
     review = get_words_by_status("review")
     available = learned + review
@@ -200,7 +204,6 @@ def generate_practice_sentences(word_entries, count=10, difficulty="medium"):
         return "Ошибка генерации предложений."
 
 def generate_dialogue(word_entries, topic="general"):
-    """Генерирует диалог на IT-тему с использованием переданных слов"""
     if not word_entries:
         return "Недостаточно слов для диалога."
     word_list = "\n".join([f"• {w['word'].split(' — ')[0]}" for w in word_entries])
@@ -283,7 +286,6 @@ def detect_add_word(text):
         if len(parts) == 2:
             word = parts[0].replace('добавь', '').replace('слово', '').strip()
             trans = parts[1].strip()
-            # пробуем извлечь тему
             topic_match = re.search(r'#(\w+)', trans)
             if topic_match:
                 topic = topic_match.group(1).lower()
@@ -335,7 +337,7 @@ async def send_daily_tasks():
                 new_count = len(get_words_by_status("new"))
                 due_count = len([w for w in get_words_by_status("learned") if w.get("next_review_date") and datetime.fromisoformat(w["next_review_date"]) <= datetime.now()])
                 if new_count > 0:
-                    reminder = f"\n\n📌 На сегодня осталось {new_count} новых слов. Введи /daily_words чтобы взять 10 слов для изучения."
+                    reminder = f"\n\n📌 На сегодня осталось {new_count} новых слов. Введи /daily_words чтобы взять 5 слов для изучения."
                 else:
                     reminder = "\n\n🎉 Все слова изучены! Добавь новые через `Добавь слово X — Y`"
                 if due_count > 0:
@@ -366,7 +368,7 @@ async def start(update, context):
         f"Выучил: {learned_count}\n"
         f"Активно использую: {review_count}\n\n"
         "Команды:\n"
-        "/daily_words [тема] — взять 10 новых слов с примерами (можно указать тему, например #agile)\n"
+        "/daily_words [тема] — взять 5 новых слов с примерами (можно указать тему, например #agile)\n"
         "/learn [тема] — обучение с кнопками (можно указать тему)\n"
         "/review — повторение (15 слов по интервальному графику)\n"
         "/practice [easy|medium|hard] — практика предложений (можно выбрать сложность)\n"
@@ -399,47 +401,35 @@ async def stats(update, context):
     )
 
 async def progress(update, context):
-    """Показывает прогресс по дням (за последние 30 дней)"""
     learned_words = get_words_by_status("learned")
     if not learned_words:
         await update.message.reply_text("У тебя пока нет выученных слов. Начни с /daily_words!")
         return
-    
-    # Группируем по датам
     daily_counts = defaultdict(int)
     for w in learned_words:
         if w.get("learned_at"):
-            date = w["learned_at"][:10]  # YYYY-MM-DD
+            date = w["learned_at"][:10]
             daily_counts[date] += 1
-    
     if not daily_counts:
         await update.message.reply_text("Нет данных для прогресса.")
         return
-    
-    # Сортируем даты
-    sorted_dates = sorted(daily_counts.keys())[-30:]  # последние 30 дней
+    sorted_dates = sorted(daily_counts.keys())[-30:]
     if not sorted_dates:
         await update.message.reply_text("Недостаточно данных.")
         return
-    
-    # Строим текстовый график
     max_count = max(daily_counts.values())
     graph = "📈 *Прогресс по дням (последние 30 дней)*\n\n"
     for date in sorted_dates:
         count = daily_counts[date]
         bar = "█" * min(count, 20) + " " * (20 - min(count, 20))
         graph += f"{date}: {bar} {count}\n"
-    
-    # Общее количество и среднее
     total = sum(daily_counts.values())
     avg = total / len(daily_counts) if daily_counts else 0
     graph += f"\n📊 Всего выучено за 30 дней: {total}\n"
     graph += f"📊 В среднем в день: {avg:.1f}"
-    
     await update.message.reply_text(graph, parse_mode="Markdown")
 
 async def weak_words(update, context):
-    """Показывает топ-10 слов с наибольшим количеством ошибок"""
     error_words = [w for w in words if w.get("error_count", 0) > 0]
     if not error_words:
         await update.message.reply_text("Отлично! У тебя нет слов, в которых ты часто ошибаешься. Продолжай в том же духе!")
@@ -452,7 +442,7 @@ async def weak_words(update, context):
     await update.message.reply_text(text, parse_mode="Markdown")
 
 async def daily_words(update, context):
-    count = 10
+    count = 5  # ← УМЕНЬШЕНО ДО 5
     topic = None
     if context.args and len(context.args) > 0:
         try:
@@ -460,13 +450,17 @@ async def daily_words(update, context):
                 topic = context.args[0][1:].lower()
             else:
                 count = int(context.args[0])
+                if count < 1:
+                    count = 1
+                if count > 10:
+                    count = 10
                 if len(context.args) > 1 and context.args[1].startswith('#'):
                     topic = context.args[1][1:].lower()
         except ValueError:
             if context.args[0].startswith('#'):
                 topic = context.args[0][1:].lower()
             else:
-                await update.message.reply_text("Укажи число или тему, например: /daily_words 10 #agile")
+                await update.message.reply_text("Укажи число или тему, например: /daily_words 5 #agile")
                 return
 
     daily = get_daily_words(count, topic)
@@ -482,7 +476,7 @@ async def daily_words(update, context):
     await update.message.reply_text("🧠 Генерирую примеры предложений для слов... Подожди немного.")
 
     prompt = f"""
-    Для каждого из следующих слов напиши ровно 3 примера предложений на английском языке с переводом на русский.
+    Для каждого из следующих слов напиши ровно 2 примера предложений на английском языке с переводом на русский.
     Предложения должны быть из IT-сферы (Product Management, аналитика, разработка, менеджмент).
     Слова: {', '.join(word_list)}
 
@@ -490,7 +484,6 @@ async def daily_words(update, context):
     Слово: [слово]
     1. [предложение на английском] — [перевод на русский]
     2. [предложение на английском] — [перевод на русский]
-    3. [предложение на английском] — [перевод на русский]
 
     Повтори этот блок для каждого слова.
     """
@@ -503,15 +496,28 @@ async def daily_words(update, context):
         )
         examples = response.choices[0].message.content
 
-        header = f"📚 *Твои {len(daily)} новых слов" + (f" по теме #{topic}" if topic else "") + " с примерами:*\n\n"
-        await update.message.reply_text(header + examples, parse_mode="Markdown")
+        if not examples or len(examples.strip()) < 10:
+            raise ValueError("Ответ от DeepSeek пустой или слишком короткий")
+
+        header = f"📚 Твои {len(daily)} новых слов" + (f" по теме #{topic}" if topic else "") + " с примерами:\n\n"
+        full_text = header + examples
+
+        parts = split_text(full_text, 4000)
+
+        for part in parts:
+            await update.message.reply_text(part, parse_mode="Markdown")
+
         await update.message.reply_text("✍️ Теперь выучи эти слова через `/learn` (карточки с кнопками).")
+
     except Exception as e:
         logging.error(f"Ошибка генерации примеров: {e}")
-        text = f"Твои {len(daily)} новых слов" + (f" по теме #{topic}" if topic else "") + " на сегодня:\n\n"
+        import traceback
+        traceback.print_exc()
+
+        text = f"⚠️ Не удалось сгенерировать примеры для этих слов. Вот список слов:\n\n"
         for i, w in enumerate(daily, 1):
             text += f"{i}. {w['word']}\n"
-        text += "\n❌ Не удалось сгенерировать примеры. Попробуй позже."
+        text += f"\n❌ Ошибка: {str(e)[:200]}"
         await update.message.reply_text(text)
 
 # === РЕЖИМ ОБУЧЕНИЯ С КНОПКАМИ ===
@@ -577,7 +583,6 @@ async def show_next(update, uid):
             if learned:
                 for word_text in learned:
                     update_word_status_by_text(word_text, "learned")
-                    # Обновляем интервал: при первом изучении интервал = 1 день
                     w = get_word_entry_by_text(word_text)
                     if w:
                         w["interval"] = 1
@@ -647,15 +652,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "yes":
         session.setdefault("learned_words", []).append(word_text)
-        # Уменьшаем ошибку, если была
         w = get_word_entry_by_text(word_text)
         if w and w.get("error_count", 0) > 0:
             w["error_count"] = max(0, w.get("error_count", 0) - 1)
             save_words(words)
         await query.edit_message_text(f"✅ '{word_text}' выучено! Перехожу к следующему...")
-    else:  # no
+    else:
         session.setdefault("skip_words", []).append(word_text)
-        # Увеличиваем ошибку
         w = get_word_entry_by_text(word_text)
         if w:
             w["error_count"] = w.get("error_count", 0) + 1
@@ -723,7 +726,7 @@ async def show_next_from_callback(update, uid):
         reply_markup=keyboard
     )
 
-# === РЕЖИМ ПОВТОРЕНИЯ (С ИНТЕРВАЛАМИ) ===
+# === РЕЖИМ ПОВТОРЕНИЯ ===
 
 async def review(update, context):
     uid = update.effective_user.id
@@ -765,7 +768,7 @@ async def review(update, context):
     )
     await show_next(update, uid)
 
-# === РЕЖИМ ПРАКТИКИ (С УЧЁТОМ СЛОЖНОСТИ) ===
+# === РЕЖИМ ПРАКТИКИ ===
 
 async def practice(update, context):
     count = 10
@@ -798,18 +801,21 @@ async def practice(update, context):
     await update.message.reply_text("⏳ Генерирую предложения...")
     sentences = generate_practice_sentences(words_for_practice, count, difficulty)
 
-    await update.message.reply_text(
-        f"📝 *ПРАКТИКА ПЕРЕВОДА ({count} предложений, сложность: {difficulty})*\n\n"
-        f"{sentences}\n\n"
-        f"✍️ Переведи предложения на английский и отправь мне.\n"
-        f"Я проверю все переводы!"
-    )
+    parts = split_text(sentences, 4000)
+    header = f"📝 *ПРАКТИКА ПЕРЕВОДА ({count} предложений, сложность: {difficulty})*\n\n"
+    
+    for i, part in enumerate(parts):
+        if i == 0:
+            await update.message.reply_text(header + part, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(part, parse_mode="Markdown")
+    
+    await update.message.reply_text("✍️ Переведи предложения на английский и отправь мне. Я проверю все переводы!")
 
 # === РЕЖИМ ДИАЛОГА ===
 
 async def dialogue(update, context):
     uid = update.effective_user.id
-    # Берём 10 слов из learned и review для диалога
     available = get_words_by_status("learned") + get_words_by_status("review")
     if len(available) < 5:
         await update.message.reply_text("Недостаточно выученных слов для диалога. Выучи больше слов через /learn.")
@@ -819,10 +825,16 @@ async def dialogue(update, context):
     await update.message.reply_text("🗣️ Генерирую диалог на IT-тему...")
     dialogue_text = generate_dialogue(selected, topic="general")
     
-    await update.message.reply_text(
-        f"🗣️ *Диалог для практики*\n\n{dialogue_text}\n\n"
-        "📌 Прочитай диалог вслух, попробуй использовать эти слова в своей речи."
-    )
+    parts = split_text(dialogue_text, 4000)
+    header = "🗣️ *Диалог для практики*\n\n"
+    
+    for i, part in enumerate(parts):
+        if i == 0:
+            await update.message.reply_text(header + part, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(part, parse_mode="Markdown")
+    
+    await update.message.reply_text("📌 Прочитай диалог вслух, попробуй использовать эти слова в своей речи.")
 
 # === ИЗМЕНЕНИЕ СТАТУСА ===
 
@@ -892,7 +904,6 @@ async def handle(update, context):
     uid = update.effective_user.id
     text = update.message.text
 
-    # Если сессия карточек активна (для review)
     if uid in sessions and sessions[uid].get("mode") == "review":
         session = sessions[uid]
         idx = session["index"]
@@ -906,7 +917,6 @@ async def handle(update, context):
 
         await update.message.chat.send_action(action="typing")
         feedback = check_translation(text, correct_word)
-        # Проверяем, правильный ли ответ (по наличию слова "правильно" или "✅" в фидбеке)
         is_correct = "✅" in feedback or "правильно" in feedback.lower()
         update_word_after_review(word_text, is_correct)
         await update.message.reply_text(feedback)
@@ -915,7 +925,6 @@ async def handle(update, context):
         await show_next(update, uid)
         return
 
-    # Добавление слова
     add = detect_add_word(text)
     if add:
         word, trans, topic = add
@@ -948,7 +957,6 @@ async def handle(update, context):
         )
         return
 
-    # Если больше 2 строк — возможно, переводы предложений
     if len(text.split('\n')) >= 2:
         await update.message.chat.send_action(action="typing")
         await update.message.reply_text("🔍 Проверяю переводы...")
@@ -956,7 +964,6 @@ async def handle(update, context):
         await update.message.reply_text(result)
         return
 
-    # Обычный диалог
     await update.message.chat.send_action(action="typing")
     resp = ask_deepseek(uid, text)
     await update.message.reply_text(resp)
@@ -1008,7 +1015,7 @@ def main():
     scheduler.add_job(send_daily_tasks, CronTrigger(hour=9, minute=0), id='daily')
 
     print("✅ Бот запущен!")
-    print("📚 /daily_words [тема] — взять 10 новых слов с примерами")
+    print("📚 /daily_words [тема] — взять 5 новых слов с примерами")
     print("🧠 /learn [тема] — обучение с кнопками")
     print("🔄 /review — интервальное повторение")
     print("📝 /practice [easy|medium|hard] — практика предложений")
