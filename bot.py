@@ -41,6 +41,7 @@ def save_json(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# === ДЕФОЛТНЫЕ ДАННЫЕ ===
 DEFAULT_GRAMMAR_TOPICS = [
     {"id": 1, "title": "Present Perfect vs Past Simple", "level": "B2"},
     {"id": 2, "title": "Past Perfect Continuous", "level": "B2"},
@@ -59,6 +60,108 @@ DEFAULT_GRAMMAR_TOPICS = [
     {"id": 15, "title": "Ellipsis & Substitution", "level": "C1"}
 ]
 
+DEFAULT_PHRASAL_VERBS = [
+    "ask out — пригласить на свидание", "back up — поддержать; резервная копия",
+    "blow up — взорвать; разозлиться", "break down — сломаться; потерять контроль",
+    "break into — проникнуть; ворваться", "break out — вырваться; вспыхнуть",
+    "break up — расстаться; разбить на части", "bring about — вызвать, привести к",
+    "bring down — свергнуть; снизить", "bring up — воспитывать; поднять тему",
+    "call back — перезвонить", "call off — отменить",
+    "call on — навестить; призвать", "call up — позвонить; призвать в армию",
+    "carry on — продолжать", "carry out — выполнить, осуществить",
+    "catch up — догнать; наверстать", "check in — зарегистрироваться",
+    "check out — выписаться; проверить", "cheer up — подбодрить",
+    "clear up — прояснить; убрать", "come across — наткнуться, случайно найти",
+    "come along — идти вместе; появляться", "come around — зайти; передумать",
+    "come back — вернуться", "come down with — заболеть чем-то",
+    "come forward — выйти вперёд, откликнуться", "come off — отвалиться; удаться",
+    "come out — выйти; стать известным", "come over — зайти в гости",
+    "come through — пережить; справиться", "come up — возникнуть; приблизиться",
+    "come up with — придумать", "count on — рассчитывать на",
+    "cut down — сократить; срубить", "cut off — отрезать; отключить",
+    "deal with — иметь дело с; справляться", "do away with — покончить с, отменить",
+    "do over — переделать", "do up — застегнуть; отремонтировать",
+    "do without — обходиться без", "draw up — составить (документ)",
+    "drop by — зайти на минутку", "drop off — завезти; заснуть",
+    "drop out — бросить (учёбу)", "end up — оказаться в итоге",
+    "fall apart — развалиться", "fall behind — отставать",
+    "fall for — влюбиться; попасться", "fall out — поссориться",
+    "figure out — разобраться, понять", "fill in — заполнить; заменить",
+    "fill out — заполнить (форму)", "find out — выяснить",
+    "follow up — следить, продолжать", "get along — ладить",
+    "get around — обходить; передвигаться", "get away — уйти, сбежать",
+    "get back — вернуться; вернуть", "get by — выживать, справляться",
+    "get down — расстраивать; спускаться", "get in — попасть внутрь; прибыть",
+    "get into — войти; увлечься", "get off — выйти; отделаться",
+    "get on — сесть; ладить", "get out — выйти; выбраться",
+    "get over — преодолеть; оправиться", "get through — пройти через; дозвониться",
+    "get together — собраться", "get up — встать",
+    "give away — отдать; выдать (секрет)", "give back — вернуть",
+    "give in — уступить", "give out — раздать; закончиться",
+    "give up — сдаться, бросить", "go after — преследовать",
+    "go ahead — продолжать; давать зелёный свет", "go away — уйти",
+    "go back — вернуться", "go down — падать, снижаться; происходить",
+    "go for — выбирать; атаковать", "go in — войти",
+    "go off — взорваться; сработать (будильник)", "go on — продолжать; происходить",
+    "go out — выходить; гаснуть", "go over — просматривать",
+    "go through — пройти через, пережить", "go up — подниматься, расти",
+    "grow up — вырастать", "hand in — сдать (работу)",
+    "hand out — раздавать", "hang on — подождать; держаться",
+    "hang out — тусоваться", "hang up — повесить трубку",
+    "hold back — сдерживать", "hold on — держаться; подождать",
+    "hold up — задерживать; ограбить", "keep on — продолжать",
+    "keep up — не отставать; поддерживать", "knock down — сбить; снести",
+    "knock out — вырубить; поразить", "lay off — уволить",
+    "leave out — пропустить, не включать", "let down — подвести",
+    "let in — впустить", "let out — выпустить; издать (звук)",
+    "look after — заботиться", "look at — смотреть на",
+    "look down on — смотреть свысока", "look for — искать",
+    "look forward to — с нетерпением ждать", "look into — изучать, разбираться",
+    "look out — осторожно!", "look over — просматривать",
+    "look up — искать (в словаре); навестить", "look up to — уважать",
+    "make out — разобрать; целоваться", "make up — придумать; помириться",
+    "make up for — компенсировать", "move in — въехать",
+    "move on — двигаться дальше", "move out — выехать",
+    "pass away — умереть", "pass by — пройти мимо",
+    "pass out — потерять сознание", "pay back — вернуть долг",
+    "pay off — окупиться; расплатиться", "pick out — выбрать",
+    "pick up — подобрать; забрать", "point out — указать на",
+    "pull off — осуществить (сложное)", "pull out — вытащить; выйти (из сделки)",
+    "pull over — прижаться к обочине", "pull through — выжить, справиться",
+    "pull up — подъехать; подтянуться", "put away — убрать",
+    "put down — положить; унизить; усыпить", "put forward — предложить",
+    "put off — отложить; оттолкнуть", "put on — надеть; набрать (вес)",
+    "put out — потушить; вывести из себя", "put through — соединить по телефону",
+    "put up — поднять; построить; приютить", "put up with — мириться с",
+    "run into — случайно встретить; врезаться", "run out — закончиться",
+    "run over — переехать; просмотреть", "set off — отправиться; взорвать",
+    "set out — отправиться; изложить", "set up — установить; основать",
+    "show off — хвастаться", "show up — появиться",
+    "shut down — закрыть; выключить", "shut up — замолчать",
+    "sit down — сесть", "sort out — разобраться; уладить",
+    "stand by — поддерживать; быть готовым", "stand for — обозначать; выступать за",
+    "stand out — выделяться", "stand up — встать; подвести",
+    "stand up for — защищать", "stay up — не спать",
+    "stick to — придерживаться", "take after — быть похожим",
+    "take apart — разобрать на части", "take away — унести; убрать",
+    "take back — взять назад", "take down — снять; записать",
+    "take in — понять; обмануть; ушить", "take off — взлететь; снять",
+    "take on — взять (работу); нанять", "take out — вынуть; пригласить",
+    "take over — взять под контроль", "take up — заняться; занять",
+    "talk into — уговорить", "talk out of — отговорить",
+    "tell off — отругать", "think over — обдумать",
+    "throw away — выбросить", "try on — примерить",
+    "try out — испытать", "turn around — развернуться; улучшиться",
+    "turn down — отвергнуть; убавить", "turn in — сдать; лечь спать",
+    "turn off — выключить; оттолкнуть", "turn on — включить; напасть",
+    "turn out — оказаться", "turn over — перевернуть",
+    "turn up — появиться; сделать громче", "wake up — проснуться",
+    "warm up — разогреться", "wear out — износить; утомить",
+    "work out — тренироваться; получиться", "write down — записать",
+    "write off — списать; считать неудачей", "zip up — застегнуть молнию"
+]
+
+# === МИГРАЦИЯ ===
 def migrate_word(w):
     defaults = {
         "ease": 2.5, "interval": 0, "next_review": None,
@@ -91,7 +194,10 @@ if added:
     logging.info(f"Добавлено {added} стартовых C1-слов")
 
 if not phrasal_verbs:
-    phrasal_verbs = []
+    phrasal_verbs = [migrate_word({"word": pv, "status": "new"}) for pv in DEFAULT_PHRASAL_VERBS]
+    save_json(PHRASAL_FILE, phrasal_verbs)
+    logging.info(f"Загружено {len(phrasal_verbs)} фразовых глаголов")
+
 if not grammar_topics:
     grammar_topics = DEFAULT_GRAMMAR_TOPICS
 
@@ -114,7 +220,7 @@ user_histories = {}
 sessions = {}
 scheduler = AsyncIOScheduler()
 
-# === SRS ===
+# === SRS (ФИКС: грамматика new→review) ===
 def srs_update(item, quality):
     ease = item.get("ease", 2.5)
     interval = item.get("interval", 0)
@@ -151,7 +257,8 @@ def srs_update(item, quality):
     item["reps"] = reps
     item["lapses"] = lapses
     item["next_review"] = next_review
-    if reps >= 1 and item.get("status") == "learning":
+    # ФИКС: любой элемент (word/grammar/phrasal), прошедший повтор, переходит в review
+    if reps >= 1 and item.get("status") in ("learning", "new"):
         item["status"] = "review"
     if reps >= 5 and lapses == 0:
         item["status"] = "mastered"
@@ -285,8 +392,21 @@ def gen_examples(items, count=2):
 """
     return safe_ds(prompt)
 
-def gen_grammar_lesson(title, level):
-    prompt = f"""Тема: "{title}" ({level}).
+def gen_grammar_lesson(title, level, short=False):
+    if short:
+        prompt = f"""Тема: "{title}" ({level}) — короткое повторение.
+Составь: 1) напоминание правила в 2-3 строках, 2) 3 упражнения с пропусками.
+НЕ используй _ * [ ] `.
+Формат:
+Правило:
+[текст]
+
+Упражнения:
+1. [с ______]
+2. ...
+"""
+    else:
+        prompt = f"""Тема: "{title}" ({level}).
 Составь: 1) правило 5-7 строк с примерами, 2) 5 упражнений с пропусками.
 НЕ используй _ * [ ] `.
 Формат:
@@ -303,24 +423,27 @@ def gen_reading(items):
     if not items:
         items = [{"word": "algorithm — алгоритм"}]
     wl = ", ".join(w["word"].split(" — ")[0] for w in items)
-    prompt = f"""Составь короткий текст (150-250 слов, уровень B2-C1, IT-тематика),
-включив эти слова/фразы: {wl}.
-После текста — 3 вопроса на понимание.
-НЕ используй _ * [ ] `.
-Формат:
-[текст]
+    prompt = f"""Write a short ENGLISH text (150-250 words, level B2-C1, IT topic).
+Include these words/phrases naturally: {wl}.
 
-Вопросы:
+Then write 3 comprehension questions IN ENGLISH.
+
+Format:
+[ENGLISH text]
+
+Questions:
 1. ...
 2. ...
 3. ...
-"""
+
+IMPORTANT: The text and questions must be in ENGLISH only. No Russian.
+Do NOT use _ * [ ] ` in your answer."""
     return safe_ds(prompt)
 
 def gen_output_task(item):
     w = item["word"].split(" — ")[0]
-    prompt = f"""Дай короткое задание (1-2 строки) на использование слова '{w}' в рабочем предложении.
-Просто попроси написать своё предложение. НЕ используй _ * [ ] `."""
+    prompt = f"""Give a short task (1-2 lines) asking the user to write a sentence with the word '{w}' in a work context.
+In Russian, since this is an instruction. No _ * [ ] `."""
     return safe_ds(prompt) or f"Напиши своё предложение со словом: {w}"
 
 def check_output(user_text, word):
@@ -393,7 +516,7 @@ def srs_kb(uid, idx, track):
         [InlineKeyboardButton("🟠 Hard", callback_data=f"srs_h_{uid}_{idx}_{track}"),
          InlineKeyboardButton("🟢 Good", callback_data=f"srs_g_{uid}_{idx}_{track}")],
         [InlineKeyboardButton("🔵 Easy", callback_data=f"srs_e_{uid}_{idx}_{track}")],
-        [InlineKeyboardButton("⏹️ Закончить", callback_data=f"srs_stop_{uid}")]
+        [InlineKeyboardButton("⏹️ Закончить", callback_data=f"srs_stop_{uid}_0_none")]
     ])
 
 def plan_kb():
@@ -417,11 +540,14 @@ async def start(update, context):
     d = user_data[uid]
     due_main = len(due_items("main"))
     due_pv = len(due_items("phrasal"))
+    due_g = len([g for g in grammar_topics if g.get("status") != "new" and is_due(g)])
     text = ("🎓 Твой C1-тренер\n\n"
             f"🔥 Streak: {d.get('streak', 0)} дней\n"
             f"📥 Новых слов: {len([w for w in words if w['status']=='new'])}\n"
-            f"🔄 Due-повторений (слова): {due_main}\n"
-            f"🔄 Due-повторений (ФГ): {due_pv}\n"
+            f"🔤 Новых ФГ: {len([w for w in phrasal_verbs if w['status']=='new'])}\n"
+            f"🔄 Due (слова): {due_main}\n"
+            f"🔄 Due (ФГ): {due_pv}\n"
+            f"📚 Due (грамматика): {due_g}\n"
             f"✅ Выучено: {len([w for w in words if w['status']=='mastered'])}\n\n"
             "Жми «☀️ Дневная сессия» — 30 минут, всё по плану.")
     if update.callback_query:
@@ -469,6 +595,9 @@ async def session_start(update, context):
 
     random.shuffle(queue)
 
+    grammar_is_repeat = bool(due_g)
+    grammar_item = due_g[0] if due_g else (new_g[0] if new_g and plan["grammar"] > 0 else None)
+
     sessions[uid] = {
         "mode": "session",
         "queue": queue,
@@ -476,7 +605,8 @@ async def session_start(update, context):
         "phase": "srs",
         "track": None,
         "current_correct": "",
-        "grammar_item": (due_g[0] if due_g else (new_g[0] if new_g and plan["grammar"] > 0 else None)),
+        "grammar_item": grammar_item,
+        "grammar_is_repeat": grammar_is_repeat,
         "grammar_lesson": None,
         "reading_text": None,
         "output_item": None,
@@ -487,15 +617,22 @@ async def session_start(update, context):
     }
 
     total = len(queue)
+    grammar_label = "нет"
+    if grammar_item:
+        grammar_label = grammar_item['title'] + (" (повтор)" if grammar_is_repeat else " (новая)")
     await q.message.reply_text(
         f"☀️ Дневная сессия\n\n"
         f"🔄 Повторений (слова): {len(due_w)}\n"
         f"🔄 Повторений (ФГ): {len(due_p)}\n"
         f"➕ Новых слов: {len(new_w)}\n"
         f"➕ Новых ФГ: {len(new_p)}\n"
-        f"{'📚 Грамматика: ' + (sessions[uid]['grammar_item']['title'] if sessions[uid]['grammar_item'] else 'нет')}\n\n"
-        f"Начинаем! Всего SRS-карточек: {total}"
+        f"📚 Грамматика: {grammar_label}\n\n"
+        f"Всего SRS-карточек: {total}"
     )
+    if total == 0:
+        sessions[uid]["phase"] = "grammar"
+        await session_grammar(update, uid)
+        return
     await session_next(update, uid)
 
 async def session_next(update, uid):
@@ -516,7 +653,6 @@ async def session_next(update, uid):
         s["waiting"] = True
         head = f"[{s['idx']+1}/{len(s['queue'])}] {'Слово' if item['track']=='main' else 'ФГ'}"
 
-        # НОВОЕ: показываем слово + перевод + пример
         if item.get("is_new") and not item.get("presented"):
             item["presented"] = True
             if not w.get("saved_examples"):
@@ -531,7 +667,6 @@ async def session_next(update, uid):
             await update.effective_message.reply_text(msg)
             return
 
-        # Старое: только русский, вспоминаем
         ctx = ""
         if w.get("saved_examples"):
             ctx = f"\n\n📎 Пример:\n{w['saved_examples'][0]}"
@@ -561,15 +696,17 @@ async def session_grammar(update, uid):
         await session_reading(update, uid)
         return
     msg = update.effective_message
-    await msg.reply_text(f"⏳ Грамматика: {item['title']}...")
-    lesson = gen_grammar_lesson(item["title"], item["level"])
+    is_repeat = s.get("grammar_is_repeat", False)
+    prefix = "🔄 Повтор грамматики" if is_repeat else "📚 Грамматика"
+    await msg.reply_text(f"⏳ {prefix}: {item['title']}...")
+    lesson = gen_grammar_lesson(item["title"], item["level"], short=is_repeat)
     if not lesson:
         s["phase"] = "reading"
         await session_reading(update, uid)
         return
     s["grammar_lesson"] = lesson
     s["waiting"] = "grammar"
-    for part in split_text(f"📚 {item['title']}\n\n{lesson}", 4000):
+    for part in split_text(f"{prefix}: {item['title']}\n\n{lesson}", 4000):
         await msg.reply_text(part)
     await msg.reply_text("✍️ Напиши ответы на упражнения одним сообщением.")
 
@@ -580,7 +717,7 @@ async def session_reading(update, uid):
         pool = words[:5] if words else [{"word": "algorithm — алгоритм"}]
     sel = random.sample(pool, min(5, len(pool)))
     msg = update.effective_message
-    await msg.reply_text("⏳ Готовлю текст для чтения...")
+    await msg.reply_text("⏳ Preparing reading text...")
     text = gen_reading(sel)
     if not text:
         s["phase"] = "output"
@@ -588,9 +725,9 @@ async def session_reading(update, uid):
         return
     s["reading_text"] = text
     s["waiting"] = "reading"
-    for part in split_text(f"📖 Чтение:\n\n{text}", 4000):
+    for part in split_text(f"📖 Reading:\n\n{text}", 4000):
         await msg.reply_text(part)
-    await msg.reply_text("✍️ Ответь на 3 вопроса одним сообщением.")
+    await msg.reply_text("✍️ Answer the 3 questions in one message (English is preferred).")
 
 async def session_output(update, uid):
     s = sessions[uid]
@@ -655,7 +792,7 @@ async def handle_session_answer(update, context):
         return
 
     if s["waiting"] == "reading":
-        result = safe_ds(f"Текст:\n{s['reading_text']}\n\nОтветы пользователя:\n{txt}\n\nОцени ответы. Макс 6 строк. НЕ используй _ * [ ] `.")
+        result = safe_ds(f"Text:\n{s['reading_text']}\n\nUser answers:\n{txt}\n\nОцени ответы. Макс 6 строк. НЕ используй _ * [ ] `.")
         await update.message.reply_text(result or "Ок.")
         s["waiting"] = False
         s["phase"] = "output"
@@ -672,7 +809,7 @@ async def handle_session_answer(update, context):
         await session_finish(update, uid)
         return
 
-# === SRS КНОПКИ (ФИКС ПАРСИНГА) ===
+# === SRS КНОПКИ ===
 async def handle_srs_button(update, context):
     q = update.callback_query
     data = q.data
@@ -695,6 +832,10 @@ async def handle_srs_button(update, context):
 
     if parts[1] == "stop":
         await q.answer("Завершаем")
+        try:
+            await q.edit_message_reply_markup(reply_markup=None)
+        except:
+            pass
         s["phase"] = "done"
         await session_finish(update, uid)
         return
@@ -774,7 +915,7 @@ async def learn_start(update, context, track="main"):
         "track": track, "current_correct": "", "waiting": True,
         "results": {"again": 0, "hard": 0, "good": 0, "easy": 0},
         "new_completed": {"main": 0, "phrasal": 0},
-        "grammar_item": None, "grammar_lesson": None,
+        "grammar_item": None, "grammar_is_repeat": False, "grammar_lesson": None,
         "reading_text": None, "output_item": None
     }
     target = q.message if q else update.message
@@ -820,7 +961,7 @@ async def grammar_new(update, context):
     topic = new_topics[0]
     target = q.message if q else update.message
     await target.reply_text(f"⏳ Готовлю: {topic['title']}...")
-    lesson = gen_grammar_lesson(topic["title"], topic["level"])
+    lesson = gen_grammar_lesson(topic["title"], topic["level"], short=False)
     if not lesson:
         await target.reply_text("Не удалось. Попробуй позже.")
         return
@@ -838,7 +979,7 @@ async def grammar_due(update, context):
         return
     topic = due[0]
     await q.message.reply_text(f"⏳ Повтор: {topic['title']}...")
-    lesson = gen_grammar_lesson(topic["title"], topic["level"])
+    lesson = gen_grammar_lesson(topic["title"], topic["level"], short=True)
     if not lesson:
         await q.message.reply_text("Не удалось.")
         return
@@ -897,7 +1038,7 @@ async def grammar_retry(update, context):
         await q.message.reply_text("Тема не найдена.")
         return
     await q.message.reply_text(f"⏳ Готовлю: {topic['title']}...")
-    lesson = gen_grammar_lesson(topic["title"], topic["level"])
+    lesson = gen_grammar_lesson(topic["title"], topic["level"], short=False)
     if not lesson:
         await q.message.reply_text("Не удалось.")
         return
@@ -914,20 +1055,20 @@ async def reading_start(update, context):
     if not pool:
         pool = words[:5] if words else [{"word": "algorithm — алгоритм"}]
     sel = random.sample(pool, min(5, len(pool)))
-    await q.message.reply_text("⏳ Текст...")
+    await q.message.reply_text("⏳ Preparing text...")
     text = gen_reading(sel)
     if not text:
         await q.message.reply_text("Не удалось.")
         return
     sessions[uid] = {"mode": "reading", "text": text}
-    for p in split_text(f"📖 Чтение:\n\n{text}", 4000):
+    for p in split_text(f"📖 Reading:\n\n{text}", 4000):
         await q.message.reply_text(p)
-    await q.message.reply_text("✍️ Ответь на вопросы одним сообщением.")
+    await q.message.reply_text("✍️ Answer the 3 questions in one message.")
 
 async def handle_reading_answer(update, context):
     uid = update.effective_user.id
     s = sessions[uid]
-    result = safe_ds(f"Текст:\n{s['text']}\n\nОтветы:\n{update.message.text}\n\nОцени. Макс 6 строк. НЕ используй _ * [ ] `.")
+    result = safe_ds(f"Text:\n{s['text']}\n\nUser answers:\n{update.message.text}\n\nОцени. Макс 6 строк. НЕ используй _ * [ ] `.")
     await update.message.reply_text(result or "Ок.")
     del sessions[uid]
 
@@ -963,6 +1104,7 @@ async def progress_menu(update, context):
     learning = len([w for w in words if w["status"] == "learning"])
     new = len([w for w in words if w["status"] == "new"])
     pv_mastered = len([w for w in phrasal_verbs if w["status"] == "mastered"])
+    grammar_done = len([g for g in grammar_topics if g.get("status") in ("review", "mastered")])
     text = (f"📊 Прогресс\n\n"
             f"🔥 Streak: {d.get('streak', 0)}\n"
             f"📥 Новых: {new}\n"
@@ -970,7 +1112,8 @@ async def progress_menu(update, context):
             f"🔄 Review: {review}\n"
             f"✅ Mastered: {mastered}\n"
             f"📚 Всего слов: {len(words)}\n"
-            f"🔤 ФГ mastered: {pv_mastered}/{len(phrasal_verbs)}\n\n"
+            f"🔤 ФГ mastered: {pv_mastered}/{len(phrasal_verbs)}\n"
+            f"📚 Грамматика пройдено: {grammar_done}/{len(grammar_topics)}\n\n"
             f"Milestones: {'🎯 100' if mastered >= 100 else ''}"
             f"{' 🏆 500' if mastered >= 500 else ''}"
             f"{' 💎 1000' if mastered >= 1000 else ''}")
@@ -1116,7 +1259,11 @@ async def plan_menu(update, context):
 async def plan_set(update, context):
     q = update.callback_query
     uid = str(q.from_user.id)
-    _, w, p, g = q.data.split("_")
+    parts = q.data.split("_")
+    if len(parts) < 4:
+        await q.answer("Ошибка")
+        return
+    w, p, g = parts[1], parts[2], parts[3]
     user_data[uid]["daily_plan"] = {"words": int(w), "phrasal": int(p), "grammar": int(g)}
     save_json(USER_DATA_FILE, user_data)
     await q.edit_message_text(f"✅ План: {w} слов, {p} ФГ, {g} грамматика.", reply_markup=main_kb())
@@ -1235,7 +1382,6 @@ async def handle(update, context):
             w = sessions[uid].get("waiting")
             if w is True or isinstance(w, str):
                 return await handle_session_answer(update, context)
-            # waiting=False — ждём нажатия кнопки
             await update.message.reply_text("👆 Нажми одну из кнопок: 🔴 🟠 🟢 🔵")
             return
         if mode == "grammar_lesson":
@@ -1302,10 +1448,11 @@ async def send_daily_tasks():
             continue
         try:
             due = len(due_items("main")) + len(due_items("phrasal"))
+            due_g = len([g for g in grammar_topics if g.get("status") != "new" and is_due(g)])
             streak = d.get("streak", 0)
             await bot.send_message(
                 chat_id=int(uid),
-                text=f"🌞 Доброе утро!\n🔥 Streak: {streak}\n🔄 Due: {due}\n\nЖми «☀️ Дневная сессия»."
+                text=f"🌞 Доброе утро!\n🔥 Streak: {streak}\n🔄 Due слова+ФГ: {due}\n📚 Due грамматика: {due_g}\n\nЖми «☀️ Дневная сессия»."
             )
         except Exception as e:
             logging.error(e)
@@ -1436,7 +1583,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
     scheduler.add_job(send_daily_tasks, CronTrigger(hour=9, minute=0), id='daily')
-    print("✅ Бот запущен (C1 + SRS, финальная версия)!")
+    print("✅ Бот запущен (C1 + SRS, финальная версия + grammar repeat)!")
     app.run_polling()
 
 async def daily_words_compat(update, context, track):
@@ -1469,9 +1616,9 @@ async def reading_start_compat(update, context):
         await update.message.reply_text("Не удалось.")
         return
     sessions[update.effective_user.id] = {"mode": "reading", "text": text}
-    for p in split_text(f"📖 Чтение:\n\n{text}", 4000):
+    for p in split_text(f"📖 Reading:\n\n{text}", 4000):
         await update.message.reply_text(p)
-    await update.message.reply_text("Ответь на вопросы одним сообщением.")
+    await update.message.reply_text("Answer the 3 questions in one message.")
 
 async def grammar_compat(update, context):
     class FakeQ:
