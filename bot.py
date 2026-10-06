@@ -29,7 +29,6 @@ PHRASAL_FILE = "phrasal.json"
 GRAMMAR_FILE = "grammar.json"
 USER_DATA_FILE = "user_data.json"
 
-# === ЗАГРУЗКА/СОХРАНЕНИЕ ===
 def load_json(path, default):
     if os.path.exists(path):
         with open(path, 'r', encoding='utf-8') as f:
@@ -40,7 +39,7 @@ def save_json(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# === ДЕФОЛТНЫЙ СПИСОК ФРАЗОВЫХ ГЛАГОЛОВ (200+) ===
+# === ДЕФОЛТНЫЙ СПИСОК ФРАЗОВЫХ ГЛАГОЛОВ ===
 DEFAULT_PHRASAL_VERBS = [
     "ask out — пригласить на свидание",
     "back up — поддержать; сделать резервную копию",
@@ -263,12 +262,7 @@ words = load_json(WORDS_FILE, [])
 phrasal_verbs = load_json(PHRASAL_FILE, [])
 grammar_topics = load_json(GRAMMAR_FILE, [])
 
-# Инициализация файлов при первом запуске
-if not words and os.path.exists(WORDS_FILE) == False:
-    save_json(WORDS_FILE, [])
-
 if not phrasal_verbs:
-    # Создаём фразовые глаголы из дефолтного списка
     phrasal_verbs = [
         {
             "word": pv,
@@ -291,7 +285,6 @@ user_histories = {}
 sessions = {}
 scheduler = AsyncIOScheduler()
 
-# === КОНСТАНТЫ ===
 REVIEW_INTERVALS = {"review_1": 3, "review_2": 7, "review_3": 14}
 NEXT_STATUS = {"learning": "review_1", "review_1": "review_2", "review_2": "review_3", "review_3": "mastered"}
 
@@ -311,9 +304,7 @@ def split_text(text, max_length=4000):
         parts.append(current)
     return parts
 
-# === РАБОТА С ТРЕКАМИ ===
 def get_track(track):
-    """Возвращает список слов трека: 'main' или 'phrasal'"""
     if track == "main":
         return words
     elif track == "phrasal":
@@ -356,12 +347,10 @@ def get_learn_cards(track, limit=10):
     learning = words_by_status(track, "learning")
     learning.sort(key=lambda x: x.get("learned_at", "1970-01-01"))
     now = datetime.now()
-    review_statuses = ["review_1", "review_2", "review_3"]
-    review = words_by_statuses(track, review_statuses)
+    review = words_by_statuses(track, ["review_1", "review_2", "review_3"])
     due = [w for w in review if w.get("next_review_date") and datetime.fromisoformat(w["next_review_date"]) <= now]
     due.sort(key=lambda x: x.get("next_review_date", "2099-01-01"))
-    all_cards = learning + due
-    return all_cards[:limit]
+    return (learning + due)[:limit]
 
 def get_practice_words(track, limit=10):
     mastered = words_by_status(track, "mastered")
@@ -372,124 +361,88 @@ def get_practice_words(track, limit=10):
     return random.sample(available, min(limit, len(available)))
 
 # === DEEPSEEK ===
+def safe_ds(prompt, max_len=3000):
+    """Безопасный вызов DeepSeek — возвращает текст без markdown-спецсимволов."""
+    try:
+        r = deepseek_client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "user", "content": prompt}],
+            stream=False
+        )
+        text = r.choices[0].message.content
+        return text
+    except Exception as e:
+        logging.error(f"DS ошибка: {e}")
+        return None
+
 def generate_examples(word_entries):
     if not word_entries:
         return None
     prompt = f"""Для каждого из следующих слов напиши ровно 2 примера предложений на английском с переводом на русский.
-IT-сфера. Слова: {', '.join([w['word'].split(' — ')[0] for w in word_entries])}
+IT-сфера. НЕ используй символы _ * [ ] ` в ответе.
+Слова: {', '.join([w['word'].split(' — ')[0] for w in word_entries])}
 Формат:
 Слово: [слово]
 1. [англ] — [рус]
 2. [англ] — [рус]
 """
-    try:
-        r = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            stream=False
-        )
-        return r.choices[0].message.content
-    except Exception as e:
-        logging.error(f"Ошибка: {e}")
-        return None
+    return safe_ds(prompt)
 
 def generate_sentences_russian(word_entries, count=5):
-    """Предложения на русском для перевода на английский"""
     if not word_entries:
         return None
     word_list = ", ".join([w['word'].split(' — ')[0] for w in word_entries])
     prompt = f"""Составь {count} предложений на РУССКОМ языке для перевода на английский.
 В каждом предложении используй одно из слов: {word_list}
-IT-сфера (Product Management, аналитика, разработка).
+IT-сфера. НЕ используй символы _ * [ ] `.
 Формат: пронумерованный список 1..{count}."""
-    try:
-        r = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            stream=False
-        )
-        return r.choices[0].message.content
-    except:
-        return None
+    return safe_ds(prompt)
 
 def generate_sentences_english(word_entries, count=5):
-    """Предложения на английском для перевода на русский"""
     if not word_entries:
         return None
     word_list = ", ".join([w['word'].split(' — ')[0] for w in word_entries])
     prompt = f"""Составь {count} предложений на АНГЛИЙСКОМ языке для перевода на русский.
 В каждом предложении используй одно из слов: {word_list}
-IT-сфера (Product Management, аналитика, разработка).
+IT-сфера. НЕ используй символы _ * [ ] `.
 Формат: пронумерованный список 1..{count}."""
-    try:
-        r = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            stream=False
-        )
-        return r.choices[0].message.content
-    except:
-        return None
+    return safe_ds(prompt)
 
 def check_translation(user_text, correct_text):
     prompt = f"""Пользователь перевёл.
 ПРАВИЛЬНЫЙ ОТВЕТ: {correct_text}
 ОТВЕТ ПОЛЬЗОВАТЕЛЯ: {user_text}
-Оцени: правильно или нет. Если ошибка — объясни кратко (макс 3 предложения)."""
-    try:
-        r = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            stream=False
-        )
-        return r.choices[0].message.content
-    except:
-        return f"✅ Правильный ответ: {correct_text}"
+Оцени: правильно или нет. Объясни кратко (макс 3 предложения). НЕ используй _ * [ ] `."""
+    return safe_ds(prompt) or f"Правильный ответ: {correct_text}"
 
 def check_sentence_translation(user_text, sentence, direction):
-    """Проверка перевода целого предложения"""
     if direction == "ru_to_en":
         prompt = f"""Пользователь перевёл русское предложение на английский.
-РУССКОЕ ПРЕДЛОЖЕНИЕ: {sentence}
-ПЕРЕВОД ПОЛЬЗОВАТЕЛЯ: {user_text}
-Оцени: правильно или нет. Укажи ошибки, предложи правильный вариант. Макс 5 строк."""
+РУССКОЕ: {sentence}
+ПЕРЕВОД: {user_text}
+Оцени, укажи ошибки, предложи правильный вариант. Макс 5 строк. НЕ используй _ * [ ] `."""
     else:
         prompt = f"""Пользователь перевёл английское предложение на русский.
-АНГЛИЙСКОЕ ПРЕДЛОЖЕНИЕ: {sentence}
-ПЕРЕВОД ПОЛЬЗОВАТЕЛЯ: {user_text}
-Оцени: правильно или нет. Укажи ошибки, предложи правильный вариант. Макс 5 строк."""
-    try:
-        r = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            stream=False
-        )
-        return r.choices[0].message.content
-    except:
-        return "⚠️ Не удалось проверить."
+АНГЛИЙСКОЕ: {sentence}
+ПЕРЕВОД: {user_text}
+Оцени, укажи ошибки, предложи правильный вариант. Макс 5 строк. НЕ используй _ * [ ] `."""
+    return safe_ds(prompt) or "Не удалось проверить."
 
 def generate_grammar_lesson(topic_title, level):
     prompt = f"""Тема: "{topic_title}" (уровень {level}).
 Составь мини-урок:
 1. Краткое объяснение правила (5-7 строк) с примерами.
-2. 5 упражнений: предложения с пропусками, где нужно вставить правильную форму/структуру.
+2. 5 упражнений: предложения с пропусками.
+НЕ используй символы _ * [ ] ` в ответе.
 Формат:
-📖 Правило:
+Правило:
 [объяснение]
 
-✍️ Упражнения:
+Упражнения:
 1. [предложение с ______]
 2. ...
 """
-    try:
-        r = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            stream=False
-        )
-        return r.choices[0].message.content
-    except:
-        return None
+    return safe_ds(prompt)
 
 def check_grammar_answers(user_text, lesson):
     prompt = f"""Урок:
@@ -498,20 +451,12 @@ def check_grammar_answers(user_text, lesson):
 Ответы пользователя:
 {user_text}
 
-Проверь ответы, укажи ошибки и правильные варианты. Макс 10 строк."""
-    try:
-        r = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            stream=False
-        )
-        return r.choices[0].message.content
-    except:
-        return "⚠️ Не удалось проверить."
+Проверь ответы, укажи ошибки и правильные варианты. Макс 10 строк. НЕ используй _ * [ ] `."""
+    return safe_ds(prompt) or "Не удалось проверить."
 
 def ask_deepseek(user_id, text):
     if user_id not in user_histories:
-        user_histories[user_id] = [{"role": "system", "content": "Ты репетитор английского для IT."}]
+        user_histories[user_id] = [{"role": "system", "content": "Ты репетитор английского для IT. Не используй символы _ * [ ] ` в ответах."}]
     user_histories[user_id].append({"role": "user", "content": text})
     try:
         r = deepseek_client.chat.completions.create(
@@ -531,7 +476,7 @@ def ask_deepseek(user_id, text):
 def detect_add_word(text):
     m = re.search(r'добавь\s+слово\s+(.+?)\s*[-—]\s*(.+)', text, re.IGNORECASE)
     if m:
-        return (m.group(1).strip(), m.group(2).strip())
+        return (m.group(1).strip(), m.group(2).strip(), "new")
     m = re.search(r'^\+ (.+?)\s*[-—]\s*(.+)$', text.strip())
     if m:
         return (m.group(1).strip(), m.group(2).strip(), "learning")
@@ -616,8 +561,8 @@ async def send_daily_tasks():
                     reminder += f"\n📌 Новых слов: {new_count}. Введи /daily_words"
                 if learning_count > 0:
                     reminder += f"\n📖 {learning_count} слов ждут тренировки! Введи /learn"
-                reminder += "\n\n🔤 Не забудь про фразовые глаголы: /daily_phrasal"
-                reminder += "\n📚 И грамматика: /grammar"
+                reminder += "\n\n🔤 Фразовые глаголы: /daily_phrasal"
+                reminder += "\n📚 Грамматика: /grammar"
                 await bot.send_message(chat_id=int(uid_str), text="🌞 Доброе утро!" + reminder)
             except Exception as e:
                 logging.error(f"Ошибка: {e}")
@@ -628,18 +573,17 @@ async def start(update, context):
     if uid not in user_data:
         user_data[uid] = {"receives_daily": True, "grammar_progress": 0}
         save_json(USER_DATA_FILE, user_data)
-    text = ("👋 *Привет! Я — система изучения английского для IT!*\n\n"
+    text = ("👋 Привет! Я — система изучения английского для IT!\n\n"
             f"📥 Новых (main): {len(words_by_status('main', 'new'))}\n"
             f"📖 Учу (main): {len(words_by_status('main', 'learning'))}\n"
-            f"🔤 Фразовых глаголов новых: {len(words_by_status('phrasal', 'new'))}\n"
+            f"🔤 Новых ФГ: {len(words_by_status('phrasal', 'new'))}\n"
             f"📚 Грамматика: тема {user_data[uid].get('grammar_progress', 0) + 1}\n\n"
             "Выбери действие:")
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_kb())
+        await update.callback_query.edit_message_text(text, reply_markup=main_kb())
     else:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
+        await update.message.reply_text(text, reply_markup=main_kb())
 
-# === БОЛЬШОЙ ОБРАБОТЧИК КНОПОК ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -650,7 +594,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
     if data == "menu_more":
-        await q.edit_message_text("🔧 *Дополнительные функции:*", parse_mode="Markdown", reply_markup=more_kb())
+        await q.edit_message_text("🔧 Дополнительные функции:", reply_markup=more_kb())
         return
     if data == "menu_daily":
         await daily_words(update, context, track="main")
@@ -663,9 +607,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "menu_stats":
         await stats(update, context)
     elif data == "menu_phrasal":
-        await q.edit_message_text("🔤 *Фразовые глаголы:*", parse_mode="Markdown", reply_markup=phrasal_kb())
+        await q.edit_message_text("🔤 Фразовые глаголы:", reply_markup=phrasal_kb())
     elif data == "menu_grammar":
-        await q.edit_message_text("📚 *Грамматика B2-C1:*", parse_mode="Markdown", reply_markup=grammar_kb())
+        await q.edit_message_text("📚 Грамматика B2-C1:", reply_markup=grammar_kb())
     elif data == "menu_practice":
         await practice(update, context)
     elif data == "menu_dialogue":
@@ -677,7 +621,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "menu_reset_learning":
         await reset_learning(update, context)
 
-    # Фразовые глаголы
     elif data == "phrasal_daily":
         await daily_words(update, context, track="phrasal")
     elif data == "phrasal_learn":
@@ -685,13 +628,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "phrasal_stats":
         await stats(update, context, track="phrasal")
 
-    # Грамматика
     elif data == "grammar_new":
         await grammar_new(update, context)
     elif data == "grammar_progress":
         await grammar_progress(update, context)
+    elif data == "grammar_next":
+        await grammar_next_topic(update, context)
+    elif data == "grammar_retry":
+        await grammar_retry(update, context)
 
-    # Обучение (кнопки hint/skip/stop)
     elif data.startswith("hint_"):
         await handle_hint(update, context)
     elif data.startswith("skip_"):
@@ -703,32 +648,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("trans_stop_"):
         await translation_finish(update, context)
 
-# === ОБУЧЕНИЕ СЛОВ (универсально для main и phrasal) ===
+# === ОБУЧЕНИЕ ===
 async def learn_start(update, context, track="main"):
     uid = update.effective_user.id
     if uid in sessions:
-        # Разрешаем перезапуск (удаляем старую)
         del sessions[uid]
     cards = get_learn_cards(track, 10)
     if not cards:
-        msg = "📚 Нет слов для тренировки." + (" Сначала возьми /daily_words." if track == "main" else " Сначала возьми /daily_phrasal.")
+        msg = "📚 Нет слов для тренировки."
         target = update.callback_query.message if update.callback_query else update.message
         await target.reply_text(msg, reply_markup=main_kb())
         return
     sessions[uid] = {
-        "mode": "learn",
-        "track": track,
-        "cards": cards,
-        "index": 0,
-        "direction": "ru_to_en",
-        "results": [],
-        "errors": [],
-        "waiting_for_answer": True,
-        "current_correct": "",
-        "current_message_id": None
+        "mode": "learn", "track": track, "cards": cards, "index": 0,
+        "direction": "ru_to_en", "results": [], "errors": [],
+        "waiting_for_answer": True, "current_correct": ""
     }
     target = update.callback_query.message if update.callback_query else update.message
-    await target.reply_text(f"🧠 *Тренировка ({'ФГ' if track == 'phrasal' else 'слова'})!* {len(cards)} карточек.\n✍️ Пиши перевод вручную.", parse_mode="Markdown")
+    await target.reply_text(f"🧠 Тренировка ({'ФГ' if track == 'phrasal' else 'слова'})! {len(cards)} карточек.\n✍️ Пиши перевод вручную.")
     await show_learn_card(update, uid)
 
 async def show_learn_card(update, uid):
@@ -754,16 +691,15 @@ async def show_learn_card(update, uid):
     en = word.split(" — ")[0]
     ru = word.split(" — ")[1]
     if direction == "ru_to_en":
-        text = f"📖 *{ru}*  ({idx+1}/{len(cards)})\n\n✍️ Напиши перевод на английский:"
+        text = f"📖 {ru}  ({idx+1}/{len(cards)})\n\n✍️ Напиши перевод на английский:"
         s["current_correct"] = en
     else:
-        text = f"📖 *{en}*  ({idx+1}/{len(cards)})\n\n✍️ Напиши перевод на русский:"
+        text = f"📖 {en}  ({idx+1}/{len(cards)})\n\n✍️ Напиши перевод на русский:"
         s["current_correct"] = ru
     s["waiting_for_answer"] = True
     kb = learn_kb(uid, idx)
     target = update.callback_query.message if update.callback_query else update.message
-    msg = await target.reply_text(text, parse_mode="Markdown", reply_markup=kb)
-    s["current_message_id"] = msg.message_id
+    await target.reply_text(text, reply_markup=kb)
 
 async def handle_hint(update, context):
     q = update.callback_query
@@ -811,15 +747,19 @@ async def finish_learn(update, uid):
     results = s.get("results", [])
     errors = list(set(s.get("errors", [])))
     correct = len([r for r in results if r["correct"]])
-    text = f"📊 *Результаты*\n✅ {correct}\n❌ {len(results) - correct}\n"
+    text = f"📊 Результаты\n✅ {correct}\n❌ {len(results) - correct}\n"
     for r in results:
         if r["correct"]:
-            update_status(track, r["word"], NEXT_STATUS.get(get_word_entry(track, r["word"]).get("status"), "mastered"))
+            entry = get_word_entry(track, r["word"])
+            if entry:
+                cur = entry.get("status", "learning")
+                nxt = NEXT_STATUS.get(cur, "mastered")
+                update_status(track, r["word"], nxt)
     if errors:
         text += "\n🔄 Ошибки:\n" + "\n".join(f"• {e}" for e in errors[:10])
     del sessions[uid]
     target = update.callback_query.message if update.callback_query else update.message
-    await target.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
+    await target.reply_text(text, reply_markup=main_kb())
 
 async def handle_learn_answer(update, context):
     uid = update.effective_user.id
@@ -832,7 +772,7 @@ async def handle_learn_answer(update, context):
     word_text = card["word"].split(" — ")[0]
     correct = s["current_correct"]
     feedback = check_translation(text, correct)
-    is_correct = "✅" in feedback or "правильно" in feedback.lower()
+    is_correct = "✅" in feedback or "правильно" in feedback.lower() or "correct" in feedback.lower()
     s["results"].append({"word": word_text, "correct": is_correct})
     if not is_correct:
         s["errors"].append(word_text)
@@ -845,28 +785,23 @@ async def handle_learn_answer(update, context):
     s["waiting_for_answer"] = False
     await show_learn_card(update, uid)
 
-# === ТРЕНИРОВКА ПРЕДЛОЖЕНИЙ (translation) ===
+# === ТРЕНИРОВКА ПРЕДЛОЖЕНИЙ ===
 async def translation_start(update, context):
     uid = update.effective_user.id
     if uid in sessions:
         del sessions[uid]
-
-    # Берём слова в статусе learning
     learning = words_by_status("main", "learning")
     if len(learning) < 3:
-        msg = "📝 Недостаточно слов в статусе learning (нужно минимум 3). Возьми новые через /daily_words."
+        msg = "📝 Недостаточно слов в статусе learning (нужно 3+). Возьми новые через /daily_words."
         target = update.callback_query.message if update.callback_query else update.message
         await target.reply_text(msg, reply_markup=main_kb())
         return
-
     sample = random.sample(learning, min(5, len(learning)))
     target = update.callback_query.message if update.callback_query else update.message
     await target.reply_text("⏳ Генерирую предложения...")
-
     ru_sentences = generate_sentences_russian(sample, count=5)
     en_sentences = generate_sentences_english(sample, count=5)
 
-    # Парсим
     def parse_sentences(text):
         if not text:
             return []
@@ -880,27 +815,18 @@ async def translation_start(update, context):
 
     ru_list = parse_sentences(ru_sentences)
     en_list = parse_sentences(en_sentences)
-
     if not ru_list and not en_list:
         await target.reply_text("⚠️ Не удалось сгенерировать. Попробуй позже.")
         return
-
     sessions[uid] = {
-        "mode": "translation",
-        "direction": "ru_to_en",
-        "ru_sentences": ru_list,
-        "en_sentences": en_list,
-        "sentences": ru_list,
-        "index": 0,
-        "current_sentence": "",
-        "results": [],
+        "mode": "translation", "direction": "ru_to_en",
+        "ru_sentences": ru_list, "en_sentences": en_list,
+        "sentences": ru_list, "index": 0, "current_sentence": "",
         "words": sample
     }
-
     await target.reply_text(
-        f"📝 *Тренировка предложений*\nБудет {len(ru_list)} предложений RU→EN, потом {len(en_list)} EN→RU.\n"
-        f"Чтобы остановить — /stop",
-        parse_mode="Markdown"
+        f"📝 Тренировка предложений\nБудет {len(ru_list)} предложений RU→EN, потом {len(en_list)} EN→RU.\n"
+        f"Чтобы остановить — /stop"
     )
     await show_translation_card(update, uid)
 
@@ -926,8 +852,8 @@ async def show_translation_card(update, uid):
     target = update.message if update.message else update.callback_query.message
     kb = translation_kb(uid)
     await target.reply_text(
-        f"📝 *{direction_label}* ({s['index']+1}/{len(s['sentences'])})\n\n{sentence}\n\n✍️ Напиши перевод:",
-        parse_mode="Markdown", reply_markup=kb
+        f"📝 {direction_label} ({s['index']+1}/{len(s['sentences'])})\n\n{sentence}\n\n✍️ Напиши перевод:",
+        reply_markup=kb
     )
 
 async def handle_translation_answer(update, context):
@@ -955,24 +881,22 @@ async def translation_skip(update, context):
 async def translation_finish(update, uid):
     if uid not in sessions:
         return
-    s = sessions[uid]
+    del sessions[uid]
     target = update.message if update.message else update.callback_query.message
     await target.reply_text("✅ Тренировка предложений завершена!", reply_markup=main_kb())
-    del sessions[uid]
 
-# === ВЗЯТЬ НОВЫЕ СЛОВА ===
+# === НОВЫЕ СЛОВА ===
 async def daily_words(update, context, track="main"):
     uid = str(update.effective_user.id)
     today = datetime.now().date()
     learning_today = [w for w in words_by_status(track, "learning")
                       if w.get("learned_at") and datetime.fromisoformat(w["learned_at"]).date() == today]
+    target = update.callback_query.message if update.callback_query else update.message
     if len(learning_today) >= 10:
-        target = update.callback_query.message if update.callback_query else update.message
         await target.reply_text("📚 Сегодня уже взято 10 слов.")
         return
     new = words_by_status(track, "new")
     if not new:
-        target = update.callback_query.message if update.callback_query else update.message
         await target.reply_text("🎉 Новых слов нет.")
         return
     available = min(5, 10 - len(learning_today), len(new))
@@ -981,17 +905,16 @@ async def daily_words(update, context, track="main"):
         w["status"] = "learning"
         w["learned_at"] = datetime.now().isoformat()
     save_track(track)
-    target = update.callback_query.message if update.callback_query else update.message
     await target.reply_text("🧠 Генерирую примеры...")
     examples = generate_examples(selected)
-    text = f"📚 *Взято {len(selected)} новых:*\n\n"
+    text = f"📚 Взято {len(selected)} новых:\n\n"
     for i, w in enumerate(selected, 1):
         text += f"{i}. {w['word']}\n"
     if examples:
-        text += f"\n📝 *Примеры:*\n\n{examples}"
-    text += "\n\n✍️ Дальше: /learn" + (" (или /learn_phrasal)" if track == "phrasal" else "")
+        text += f"\n📝 Примеры:\n\n{examples}"
+    text += "\n\n✍️ Дальше: /learn" + ("_phrasal" if track == "phrasal" else "")
     for part in split_text(text, 4000):
-        await target.reply_text(part, parse_mode="Markdown")
+        await target.reply_text(part)
     await target.reply_text("Выбери действие:", reply_markup=main_kb())
 
 async def phrasal_daily(update, context):
@@ -1005,28 +928,28 @@ async def stats(update, context, track="main"):
     r2 = len(words_by_status(track, "review_2"))
     r3 = len(words_by_status(track, "review_3"))
     m = len(words_by_status(track, "mastered"))
-    text = (f"📊 *Статистика ({'ФГ' if track == 'phrasal' else 'main'})*\n\n"
+    text = (f"📊 Статистика ({'ФГ' if track == 'phrasal' else 'main'})\n\n"
             f"📥 Новых: {new_c}\n📖 Учу: {l_c}\n"
             f"🔄 r1: {r1}, r2: {r2}, r3: {r3}\n"
             f"✅ Выучено: {m}\n📚 Всего: {len(get_track(track))}")
     target = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_kb())
+        await update.callback_query.edit_message_text(text, reply_markup=main_kb())
     else:
-        await target.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
+        await target.reply_text(text, reply_markup=main_kb())
 
 async def show_learning(update, context, track="main"):
     lw = words_by_status(track, "learning")
     if not lw:
         text = "📋 Нет слов в обучении."
     else:
-        text = "📋 *Слова на обучении:*\n\n" + "\n".join(f"{i}. {w['word']}" for i, w in enumerate(lw, 1))
+        text = "📋 Слова на обучении:\n\n" + "\n".join(f"{i}. {w['word']}" for i, w in enumerate(lw, 1))
         text += f"\n\n📊 Всего: {len(lw)}"
     target = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_kb())
+        await update.callback_query.edit_message_text(text, reply_markup=main_kb())
     else:
-        await target.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
+        await target.reply_text(text, reply_markup=main_kb())
 
 # === ГРАММАТИКА ===
 async def grammar_new(update, context):
@@ -1039,19 +962,17 @@ async def grammar_new(update, context):
         await update.callback_query.message.reply_text("🎉 Все темы пройдены!")
         return
     topic = grammar_topics[idx]
-    await update.callback_query.message.reply_text(f"⏳ Готовлю урок: *{topic['title']}*...", parse_mode="Markdown")
+    await update.callback_query.message.reply_text(f"⏳ Готовлю урок: {topic['title']}...")
     lesson = generate_grammar_lesson(topic["title"], topic["level"])
     if not lesson:
         await update.callback_query.message.reply_text("⚠️ Не удалось сгенерировать. Попробуй позже.")
         return
     sessions[uid] = {
-        "mode": "grammar",
-        "topic_idx": idx,
-        "lesson": lesson,
+        "mode": "grammar", "topic_idx": idx, "lesson": lesson,
         "waiting_for_answer": True
     }
-    for part in split_text(f"📚 *Урок {idx+1}/{len(grammar_topics)}: {topic['title']}*\n\n{lesson}", 4000):
-        await update.callback_query.message.reply_text(part, parse_mode="Markdown")
+    for part in split_text(f"📚 Урок {idx+1}/{len(grammar_topics)}: {topic['title']}\n\n{lesson}", 4000):
+        await update.callback_query.message.reply_text(part)
     await update.callback_query.message.reply_text("✍️ Напиши ответы на упражнения. Я проверю. /stop — выйти.")
 
 async def grammar_progress(update, context):
@@ -1061,7 +982,7 @@ async def grammar_progress(update, context):
     for i, t in enumerate(grammar_topics, 1):
         mark = "✅" if i <= idx else "⏳"
         text += f"{mark} {i}. {t['title']} ({t['level']})\n"
-    await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=grammar_kb())
+    await update.callback_query.edit_message_text(text, reply_markup=grammar_kb())
 
 async def handle_grammar_answer(update, context):
     uid = update.effective_user.id
@@ -1069,7 +990,6 @@ async def handle_grammar_answer(update, context):
     await update.message.chat.send_action(action="typing")
     result = check_grammar_answers(update.message.text, s["lesson"])
     await update.message.reply_text(result)
-    # Спрашиваем — перейти к следующей теме?
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Следующая тема", callback_data="grammar_next")],
         [InlineKeyboardButton("🔁 Ещё раз эту", callback_data="grammar_retry")],
@@ -1087,7 +1007,7 @@ async def grammar_next_topic(update, context):
     if uid in sessions:
         del sessions[uid]
     if cur + 1 >= len(grammar_topics):
-        await q.edit_message_text("🎉 Ты прошёл все темы! Поздравляю!")
+        await q.edit_message_text("🎉 Ты прошёл все темы!")
         return
     await q.edit_message_text(f"✅ Тема {cur + 1} завершена! Нажми «Новая тема» для следующей.", reply_markup=grammar_kb())
 
@@ -1102,7 +1022,7 @@ async def grammar_retry(update, context):
     else:
         await q.edit_message_text("Сессия потеряна. Начни заново через /grammar.")
 
-# === ПРОЧИЕ КОМАНДЫ (те, что уже были) ===
+# === ПРОЧИЕ ===
 async def practice(update, context):
     target = update.callback_query.message if update.callback_query else update.message
     uid = update.effective_user.id
@@ -1114,15 +1034,11 @@ async def practice(update, context):
         return
     await target.reply_text("⏳ Генерирую...")
     word_list = ", ".join(w["word"].split(" — ")[0] for w in words_p)
-    prompt = f"Составь 3 предложения на английском с пропусками, используя: {word_list}. После каждого дай перевод на русский."
-    try:
-        r = deepseek_client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}], stream=False)
-        cloze = r.choices[0].message.content
-    except:
-        cloze = "Ошибка"
+    prompt = f"Составь 3 предложения на английском с пропусками, используя: {word_list}. После каждого дай перевод на русский. НЕ используй _ * [ ] `."
+    cloze = safe_ds(prompt) or "Ошибка"
     sessions[uid] = {"mode": "practice_cloze", "lesson": cloze}
-    for part in split_text(f"📝 *Практика Cloze:*\n\n{cloze}", 4000):
-        await target.reply_text(part, parse_mode="Markdown")
+    for part in split_text(f"📝 Практика Cloze:\n\n{cloze}", 4000):
+        await target.reply_text(part)
     await target.reply_text("✍️ Напиши ответы одним сообщением.", reply_markup=main_kb())
 
 async def dialogue(update, context):
@@ -1137,14 +1053,10 @@ async def dialogue(update, context):
     sel = random.sample(available, min(10, len(available)))
     await target.reply_text("🗣️ Генерирую диалог...")
     wl = ", ".join(w["word"].split(" — ")[0] for w in sel)
-    prompt = f"Составь диалог на английском (6-8 реплик) с использованием: {wl}. После дай перевод."
-    try:
-        r = deepseek_client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}], stream=False)
-        dlg = r.choices[0].message.content
-    except:
-        dlg = "Ошибка"
-    for part in split_text(f"🗣️ *Диалог:*\n\n{dlg}", 4000):
-        await target.reply_text(part, parse_mode="Markdown")
+    prompt = f"Составь диалог на английском (6-8 реплик) с использованием: {wl}. После дай перевод. НЕ используй _ * [ ] `."
+    dlg = safe_ds(prompt) or "Ошибка"
+    for part in split_text(f"🗣️ Диалог:\n\n{dlg}", 4000):
+        await target.reply_text(part)
     await target.reply_text("📌 Прочитай вслух.", reply_markup=main_kb())
 
 async def weak_words(update, context):
@@ -1154,11 +1066,11 @@ async def weak_words(update, context):
         await target.reply_text("🔴 Ошибок нет!", reply_markup=more_kb())
         return
     sorted_w = sorted(error_words, key=lambda x: x.get("error_count", 0), reverse=True)[:10]
-    text = "🔴 *Топ ошибок:*\n\n" + "\n".join(f"{i}. {w['word']} — {w['error_count']}" for i, w in enumerate(sorted_w, 1))
+    text = "🔴 Топ ошибок:\n\n" + "\n".join(f"{i}. {w['word']} — {w['error_count']}" for i, w in enumerate(sorted_w, 1))
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=more_kb())
+        await update.callback_query.edit_message_text(text, reply_markup=more_kb())
     else:
-        await target.reply_text(text, parse_mode="Markdown", reply_markup=more_kb())
+        await target.reply_text(text, reply_markup=more_kb())
 
 async def progress(update, context):
     learned = words_by_statuses("main", ["learning", "review_1", "review_2", "review_3", "mastered"])
@@ -1169,15 +1081,15 @@ async def progress(update, context):
         for w in learned:
             if w.get("learned_at"):
                 counts[w["learned_at"][:10]] += 1
-        text = "📈 *Прогресс (30 дней):*\n\n"
+        text = "📈 Прогресс (30 дней):\n\n"
         for d in sorted(counts.keys())[-30:]:
             bar = "█" * min(counts[d], 20)
             text += f"{d}: {bar} {counts[d]}\n"
     target = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=more_kb())
+        await update.callback_query.edit_message_text(text, reply_markup=more_kb())
     else:
-        await target.reply_text(text, parse_mode="Markdown", reply_markup=more_kb())
+        await target.reply_text(text, reply_markup=more_kb())
 
 async def reset_learning(update, context):
     cnt = 0
@@ -1236,7 +1148,6 @@ async def handle(update, context):
     uid = update.effective_user.id
     text = update.message.text
 
-    # 1. Есть активная сессия?
     if uid in sessions:
         mode = sessions[uid].get("mode")
         if mode == "learn" and sessions[uid].get("waiting_for_answer"):
@@ -1254,14 +1165,9 @@ async def handle(update, context):
             await update.message.reply_text(res, reply_markup=main_kb())
             return
 
-    # 2. Добавление слова
     add = detect_add_word(text)
     if add:
-        if len(add) == 3:
-            word, trans, direct_status = add
-        else:
-            word, trans = add
-            direct_status = "new"
+        word, trans, direct_status = add
         existing = get_word_entry("main", word)
         if existing:
             await update.message.reply_text(f"⚠️ Уже есть: {existing['word']}")
@@ -1279,7 +1185,6 @@ async def handle(update, context):
         await update.message.reply_text(f"✅ Добавлено {label}: {new_w['word']}", reply_markup=main_kb())
         return
 
-    # 3. Добавление фразового глагола
     pv_add = detect_phrasal_add(text)
     if pv_add:
         word, trans = pv_add
@@ -1298,7 +1203,6 @@ async def handle(update, context):
         await update.message.reply_text(f"✅ ФГ добавлен: {word} — {trans}", reply_markup=main_kb())
         return
 
-    # 4. Поиск перевода
     tr = None
     for w in words:
         full = w["word"]
@@ -1307,21 +1211,16 @@ async def handle(update, context):
             tr = (en, ru)
             break
     if tr:
-        await update.message.reply_text(f"📖 *{text}*\n🇬🇧 {tr[0]}\n🇷🇺 {tr[1]}", parse_mode="Markdown")
+        await update.message.reply_text(f"📖 {text}\n🇬🇧 {tr[0]}\n🇷🇺 {tr[1]}")
         return
 
-    # 5. Много строк = переводы предложений
     if len(text.split('\n')) >= 2:
         await update.message.chat.send_action(action="typing")
-        prompt = f"Проверь переводы:\n{text}\nОцени каждый, дай процент."
-        try:
-            r = deepseek_client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}], stream=False)
-            await update.message.reply_text(r.choices[0].message.content, reply_markup=main_kb())
-        except:
-            await update.message.reply_text("Не удалось проверить.", reply_markup=main_kb())
+        prompt = f"Проверь переводы:\n{text}\nОцени каждый, дай процент. НЕ используй _ * [ ] `."
+        result = safe_ds(prompt) or "Не удалось проверить."
+        await update.message.reply_text(result, reply_markup=main_kb())
         return
 
-    # 6. Обычный диалог
     await update.message.chat.send_action(action="typing")
     resp = ask_deepseek(uid, text)
     await update.message.reply_text(resp, reply_markup=main_kb())
