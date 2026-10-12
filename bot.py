@@ -31,6 +31,8 @@ GRAMMAR_FILE = "grammar.json"
 STARTER_FILE = "c1_starter.json"
 USER_DATA_FILE = "user_data.json"
 
+WIPE_SECRET = "vocab-reset-2026"
+
 def load_json(path, default):
     if os.path.exists(path):
         with open(path, 'r', encoding='utf-8') as f:
@@ -382,7 +384,6 @@ def is_correct_answer(feedback):
         return False
     return "[CORRECT]" in feedback or "[ПРАВИЛЬНО]" in feedback
 
-# === ГЕНЕРАЦИЯ (PM/Analytics контекст) ===
 def gen_examples(items, count=2):
     if not items:
         return None
@@ -516,7 +517,6 @@ EN: [английское предложение]"""
             en = line[3:].strip()
     return ru, en
 
-# === КЛАВИАТУРЫ ===
 def main_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("☀️ Дневная сессия", callback_data="session_start")],
@@ -574,6 +574,29 @@ def plan_kb():
         [InlineKeyboardButton("25/10/2 (C1 интенсив)", callback_data="plan_25_10_2")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu_more")]
     ])
+
+async def admin_wipe(update, context):
+    args = context.args
+    if not args or args[0] != WIPE_SECRET:
+        await update.message.reply_text(
+            "❌ Неверный секрет.\nИспользование: /wipe_all <SECRET>"
+        )
+        return
+    await update.message.reply_text("🗑️ Сбрасываю всё обучение...")
+    deleted = []
+    for f in [WORDS_FILE, PHRASAL_FILE, GRAMMAR_FILE, USER_DATA_FILE]:
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+                deleted.append(f)
+        except Exception as e:
+            logging.error(f"wipe {f}: {e}")
+    await update.message.reply_text(
+        f"✅ Удалено: {', '.join(deleted) if deleted else 'ничего'}\n"
+        f"Перезапускаюсь через 2 секунды..."
+    )
+    await asyncio.sleep(2)
+    os._exit(1)
 
 async def start(update, context):
     uid = str(update.effective_user.id)
@@ -1695,6 +1718,7 @@ def main():
     app.add_handler(CommandHandler("off", toggle_sub))
     app.add_handler(CommandHandler("status", set_status_cmd))
     app.add_handler(CommandHandler("reset_learning", reset_learning))
+    app.add_handler(CommandHandler("wipe_all", admin_wipe))
     app.add_handler(CommandHandler("daily_words", lambda u, c: daily_words_compat(u, c, "main")))
     app.add_handler(CommandHandler("daily_phrasal", lambda u, c: daily_words_compat(u, c, "phrasal")))
     app.add_handler(CommandHandler("learn", lambda u, c: learn_start(u, c, "main")))
@@ -1707,7 +1731,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
     scheduler.add_job(send_daily_tasks, CronTrigger(hour=9, minute=0), id='daily')
-    print("✅ Бот запущен (PM/Analytics, сводная версия)!")
+    print("✅ Бот запущен (PM/Analytics + /wipe_all)!")
     app.run_polling()
 
 async def daily_words_compat(update, context, track):
