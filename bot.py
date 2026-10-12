@@ -30,6 +30,7 @@ PHRASAL_FILE = "phrasal.json"
 GRAMMAR_FILE = "grammar.json"
 STARTER_FILE = "c1_starter.json"
 USER_DATA_FILE = "user_data.json"
+ERRORS_FILE = "errors_log.json"
 
 WIPE_SECRET = "vocab-reset-2026"
 
@@ -382,20 +383,53 @@ def inc_today(uid, key, n=1):
 def is_correct_answer(feedback):
     if not feedback:
         return False
-    return "[CORRECT]" in feedback or "[ПРАВИЛЬНО]" in feedback
+    tail = feedback[-80:].upper()
+    if "[CORRECT]" in tail:
+        return True
+    if "[WRONG]" in tail:
+        return False
+    low = feedback.lower()
+    if "неправильно" in low or "ошибк" in low:
+        return False
+    if "верно" in low or "правильно" in low:
+        return True
+    return False
+
+def log_error_analysis(user_answer, correct, verdict, feedback, source="unknown"):
+    try:
+        log = load_json(ERRORS_FILE, [])
+        log.append({
+            "date": datetime.now().isoformat(),
+            "source": source,
+            "user_answer": user_answer,
+            "correct": correct,
+            "verdict": verdict,
+            "feedback": feedback
+        })
+        log = log[-500:]
+        save_json(ERRORS_FILE, log)
+    except Exception as e:
+        logging.error(f"log_error_analysis: {e}")
 
 def gen_examples(items, count=2):
     if not items:
         return None
-    wl = ", ".join(w["word"].split(" — ")[0] for w in items)
+    pairs = "\n".join(f"- {w['word']}" for w in items)
     prompt = f"""Для каждого слова/фразы напиши {count} примера на английском с переводом на русский.
+
+ВАЖНО: у каждого слова ниже указано конкретное значение. Используй ИМЕННО ЭТО значение во всех примерах.
+НЕ используй другие значения того же слова, даже если они существуют.
+
 Контекст: Product Manager / Product Analyst в IT-компании.
 Сценарии: discovery, A/B-тесты, метрики (DAU/MAU, retention, churn, NPS, conversion),
-юзер-интервью, роадмап, бэклог, OKR, работа со стейкхолдерами, приоритизация фичей,
-юнит-экономика, сегментация, гипотезы, фаннелы, когорты, product analytics, pricing.
-НЕ используй: релизы, деплой, CI/CD, инфраструктуру, DevOps, серверы, конфигурацию, код.
+юзер-интервью, роадмап, бэклог, OKR, стейкхолдеры, приоритизация, юнит-экономика,
+сегментация, гипотезы, фаннелы, когорты, product analytics, pricing.
+НЕ используй: релизы, деплой, CI/CD, инфраструктуру, DevOps, серверы, код.
 НЕ используй _ * [ ] ` в ответе.
-Слова: {wl}
+
+Слова (слово — значение):
+{pairs}
+
 Формат:
 Слово: [слово]
 1. [англ] — [рус]
@@ -486,23 +520,51 @@ def gen_mnemonic(word, translation):
 Макс 3 строки. НЕ используй _ * [ ] `."""
     return safe_ds(prompt) or "Не удалось сгенерировать."
 
-def check_translation(user_text, correct):
-    prompt = f"""Оцени перевод.
-ПРАВИЛЬНО: {correct}
-ПОЛЬЗОВАТЕЛЬ: {user_text}
-Ответь кратко: правильно или нет. Если ошибка — правильный вариант. Макс 3 строки.
-В САМОМ КОНЦЕ поставь [CORRECT] или [WRONG].
-НЕ используй _ * [ ] ` (кроме тега в конце)."""
-    return safe_ds(prompt) or f"Правильно: {correct}\n[WRONG]"
+def check_translation(user_text, correct, source="unknown"):
+    prompt = f"""Ты — строгий, но дружелюбный преподаватель английского уровня C1.
 
-def gen_ru_and_en(word):
-    prompt = f"""Придумай 1 предложение на РУССКОМ языке с использованием '{word}'.
+ПРАВИЛЬНЫЙ ОТВЕТ: {correct}
+ОТВЕТ УЧЕНИКА: {user_text}
+
+Разбери ответ ученика по категориям. Формат СТРОГО такой:
+
+VERDICT: CORRECT или WRONG
+ОПЕЧАТКИ: [перечисли опечатки с исправлениями, или "нет"]
+ГРАММАТИКА: [перечисли грамматические ошибки с пояснением, или "нет"]
+ЛЕКСИКА: [неудачные слова/выражения, или "нет"]
+СМЫСЛ: [передан / искажён / потерян] + короткое пояснение
+КАК СКАЗАЛ БЫ НОСИТЕЛЬ: [естественный вариант — 1 предложение, без markdown]
+ИТОГ: [1-2 строки резюме: что главное подтянуть]
+
+Правила:
+- Считай WRONG, если есть опечатки, грамматические ошибки, неверные части речи или искажение смысла. Даже одна опечатка → WRONG (это C1-уровень).
+- Считай CORRECT только если нет ни одной ошибки (мелкие стилистические замечания допустимы).
+- Не используй _ * [ ] ` в ответе.
+- Будь конкретным: "diminish → diminishing (после leads to нужен герундий)", а не просто "ошибка".
+- Если ответ идеальный — так и напиши: "Всё чисто."
+"""
+    result = safe_ds(prompt) or ""
+    verdict = "WRONG"
+    for line in result.split("\n"):
+        if line.strip().upper().startswith("VERDICT:"):
+            v = line.split(":", 1)[1].strip().upper()
+            verdict = "CORRECT" if "CORRECT" in v else "WRONG"
+            break
+    tag = "[CORRECT]" if verdict == "CORRECT" else "[WRONG]"
+    final = f"{result}\n{tag}"
+    log_error_analysis(user_text, correct, verdict, result, source)
+    return final
+
+def gen_ru_and_en(word_entry):
+    prompt = f"""Придумай 1 предложение на РУССКОМ языке, используя '{word_entry['word']}'.
+ВАЖНО: используй ИМЕННО указанное значение слова. НЕ используй другие значения того же слова.
 Контекст: работа Product Manager / Product Analyst в IT.
-Типичные сценарии: discovery, A/B-тест, метрика (retention, DAU, churn, NPS, conversion),
-интервью с пользователем, приоритизация бэклога, роадмап, работа со стейкхолдерами,
+Сценарии: discovery, A/B-тест, метрика (retention, DAU, churn, NPS, conversion),
+интервью с пользователем, приоритизация бэклога, роадмап, стейкхолдеры,
 OKR, гипотеза, фаннел, когорта, юнит-экономика, сегментация.
 НЕ используй: релиз, деплой, CI/CD, инфраструктуру, DevOps, серверы, код.
-Затем дай правильный английский перевод этого предложения, ОБЯЗАТЕЛЬНО используя '{word}'.
+Не повторяй одно и то же слово дважды. Не используй профессиональный сленг внутри русского предложения — переводи: retention → удержание, churn → отток, OKR → цели.
+Затем дай правильный английский перевод этого предложения, ОБЯЗАТЕЛЬНО используя '{word_entry['word'].split(" — ")[0]}'.
 НЕ используй _ * [ ] `.
 Формат:
 RU: [русское предложение]
@@ -526,6 +588,7 @@ def main_kb():
         [InlineKeyboardButton("📖 Чтение", callback_data="menu_reading")],
         [InlineKeyboardButton("✍️ Output-практика", callback_data="menu_output")],
         [InlineKeyboardButton("📊 Прогресс и Streak", callback_data="menu_progress")],
+        [InlineKeyboardButton("📋 Мои ошибки", callback_data="menu_errors")],
         [InlineKeyboardButton("🔧 Ещё", callback_data="menu_more")]
     ])
 
@@ -584,7 +647,7 @@ async def admin_wipe(update, context):
         return
     await update.message.reply_text("🗑️ Сбрасываю всё обучение...")
     deleted = []
-    for f in [WORDS_FILE, PHRASAL_FILE, GRAMMAR_FILE, USER_DATA_FILE]:
+    for f in [WORDS_FILE, PHRASAL_FILE, GRAMMAR_FILE, USER_DATA_FILE, ERRORS_FILE]:
         try:
             if os.path.exists(f):
                 os.remove(f)
@@ -623,6 +686,57 @@ async def start(update, context):
         await update.callback_query.edit_message_text(text, reply_markup=main_kb())
     else:
         await update.message.reply_text(text, reply_markup=main_kb())
+
+async def show_errors(update, context):
+    q = update.callback_query
+    log = load_json(ERRORS_FILE, [])
+    if not log:
+        if q:
+            await q.edit_message_text("📋 Пока нет разборов ошибок.", reply_markup=main_kb())
+        else:
+            await update.message.reply_text("📋 Пока нет разборов.", reply_markup=main_kb())
+        return
+    last = log[-10:]
+    text = f"📋 *Последние {len(last)} разборов:*\n\n"
+    for i, entry in enumerate(reversed(last), 1):
+        date_str = entry.get("date", "")[:16].replace("T", " ")
+        verdict = entry.get("verdict", "?")
+        mark = "✅" if verdict == "CORRECT" else "❌"
+        user_ans = (entry.get("user_answer") or "")[:80]
+        correct = (entry.get("correct") or "")[:80]
+        text += f"{mark} *{date_str}*\n"
+        text += f"Твой: _{user_ans}_\n"
+        text += f"Верно: _{correct}_\n\n"
+    text += "\nДля полного разбора нажми кнопку ниже."
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📖 Последний разбор", callback_data="errors_last")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="menu_back")]
+    ])
+    if q:
+        await q.edit_message_text(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=kb)
+
+async def show_last_error_detail(update, context):
+    q = update.callback_query
+    await q.answer()
+    log = load_json(ERRORS_FILE, [])
+    if not log:
+        await q.edit_message_text("📋 Пока нет разборов.", reply_markup=main_kb())
+        return
+    entry = log[-1]
+    date_str = entry.get("date", "")[:16].replace("T", " ")
+    text = (f"📖 *Разбор от {date_str}*\n\n"
+            f"*Твой ответ:*\n{entry.get('user_answer','')}\n\n"
+            f"*Правильный:*\n{entry.get('correct','')}\n\n"
+            f"{entry.get('feedback','')}")
+    parts = split_text(text, 4000)
+    for i, p in enumerate(parts):
+        if i == 0:
+            await q.edit_message_text(p, parse_mode="Markdown",
+                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_errors")]]))
+        else:
+            await q.message.reply_text(p, parse_mode="Markdown")
 
 async def session_start(update, context):
     q = update.callback_query
@@ -900,7 +1014,7 @@ async def handle_session_answer(update, context):
 
     if s["phase"] == "srs" and s.get("waiting") is True:
         item = s["queue"][s["idx"]]
-        feedback = check_translation(txt, s["current_correct"])
+        feedback = check_translation(txt, s["current_correct"], source="srs")
         await update.message.reply_text(feedback)
         s["waiting"] = False
         kb = srs_kb(uid, s["idx"], item["track"])
@@ -912,7 +1026,7 @@ async def handle_session_answer(update, context):
         w = item["word"].split(" — ")[0]
         result = check_output(txt, w)
         await update.message.reply_text(result)
-        ru, en = gen_ru_and_en(w)
+        ru, en = gen_ru_and_en(item)
         if not ru:
             s["new_practice_idx"] += 1
             s["new_practice_step"] = "own"
@@ -928,7 +1042,7 @@ async def handle_session_answer(update, context):
 
     if s["waiting"] == "new_translate":
         correct_en = s.get("new_practice_en", "")
-        result = check_translation(txt, correct_en)
+        result = check_translation(txt, correct_en, source="new_translate")
         await update.message.reply_text(result)
         s["new_practice_idx"] += 1
         s["new_practice_step"] = "own"
@@ -1352,7 +1466,7 @@ async def weekly_next(update, uid):
 async def handle_weekly_answer(update, context):
     uid = update.effective_user.id
     s = sessions[uid]
-    fb = check_translation(update.message.text, s["current"])
+    fb = check_translation(update.message.text, s["current"], source="weekly")
     if is_correct_answer(fb):
         s["correct"] += 1
     await update.message.reply_text(fb)
@@ -1655,6 +1769,11 @@ async def button_handler(update, context):
     if data == "menu_plan":
         await q.answer()
         return await plan_menu(update, context)
+    if data == "menu_errors":
+        await q.answer()
+        return await show_errors(update, context)
+    if data == "errors_last":
+        return await show_last_error_detail(update, context)
 
     if data == "session_start":
         return await session_start(update, context)
@@ -1719,6 +1838,7 @@ def main():
     app.add_handler(CommandHandler("status", set_status_cmd))
     app.add_handler(CommandHandler("reset_learning", reset_learning))
     app.add_handler(CommandHandler("wipe_all", admin_wipe))
+    app.add_handler(CommandHandler("errors", show_errors))
     app.add_handler(CommandHandler("daily_words", lambda u, c: daily_words_compat(u, c, "main")))
     app.add_handler(CommandHandler("daily_phrasal", lambda u, c: daily_words_compat(u, c, "phrasal")))
     app.add_handler(CommandHandler("learn", lambda u, c: learn_start(u, c, "main")))
@@ -1731,7 +1851,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
     scheduler.add_job(send_daily_tasks, CronTrigger(hour=9, minute=0), id='daily')
-    print("✅ Бот запущен (PM/Analytics + /wipe_all)!")
+    print("✅ Бот запущен (PM/Analytics + detailed feedback + /errors)!")
     app.run_polling()
 
 async def daily_words_compat(update, context, track):
