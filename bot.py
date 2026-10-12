@@ -41,7 +41,6 @@ def save_json(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# === ДЕФОЛТНЫЕ ДАННЫЕ ===
 DEFAULT_GRAMMAR_TOPICS = [
     {"id": 1, "title": "Present Perfect vs Past Simple", "level": "B2"},
     {"id": 2, "title": "Past Perfect Continuous", "level": "B2"},
@@ -161,7 +160,6 @@ DEFAULT_PHRASAL_VERBS = [
     "write off — списать; считать неудачей", "zip up — застегнуть молнию"
 ]
 
-# === МИГРАЦИЯ ===
 def migrate_word(w):
     defaults = {
         "ease": 2.5, "interval": 0, "next_review": None,
@@ -220,7 +218,6 @@ user_histories = {}
 sessions = {}
 scheduler = AsyncIOScheduler()
 
-# === SRS (ФИКС: грамматика new→review) ===
 def srs_update(item, quality):
     ease = item.get("ease", 2.5)
     interval = item.get("interval", 0)
@@ -257,7 +254,6 @@ def srs_update(item, quality):
     item["reps"] = reps
     item["lapses"] = lapses
     item["next_review"] = next_review
-    # ФИКС: любой элемент (word/grammar/phrasal), прошедший повтор, переходит в review
     if reps >= 1 and item.get("status") in ("learning", "new"):
         item["status"] = "review"
     if reps >= 5 and lapses == 0:
@@ -267,6 +263,8 @@ def srs_update(item, quality):
 def is_due(item):
     if item.get("status") == "new":
         return False
+    if item.get("reps", 0) == 0 and not item.get("next_review"):
+        return False
     nr = item.get("next_review")
     if not nr:
         return True
@@ -275,6 +273,13 @@ def is_due(item):
 def due_items(track):
     pool = words if track == "main" else phrasal_verbs
     return [w for w in pool if is_due(w) and w.get("status") not in ("new",)]
+
+def stale_items(track):
+    pool = words if track == "main" else phrasal_verbs
+    return [w for w in pool
+            if w.get("status") == "learning"
+            and w.get("reps", 0) == 0
+            and not w.get("next_review")]
 
 def new_items(track, limit):
     pool = words if track == "main" else phrasal_verbs
@@ -377,12 +382,17 @@ def is_correct_answer(feedback):
         return False
     return "[CORRECT]" in feedback or "[ПРАВИЛЬНО]" in feedback
 
-# === ГЕНЕРАЦИЯ ===
+# === ГЕНЕРАЦИЯ (PM/Analytics контекст) ===
 def gen_examples(items, count=2):
     if not items:
         return None
     wl = ", ".join(w["word"].split(" — ")[0] for w in items)
-    prompt = f"""Для каждого слова/фразы напиши {count} примера на английском с переводом на русский. IT-сфера.
+    prompt = f"""Для каждого слова/фразы напиши {count} примера на английском с переводом на русский.
+Контекст: Product Manager / Product Analyst в IT-компании.
+Сценарии: discovery, A/B-тесты, метрики (DAU/MAU, retention, churn, NPS, conversion),
+юзер-интервью, роадмап, бэклог, OKR, работа со стейкхолдерами, приоритизация фичей,
+юнит-экономика, сегментация, гипотезы, фаннелы, когорты, product analytics, pricing.
+НЕ используй: релизы, деплой, CI/CD, инфраструктуру, DevOps, серверы, конфигурацию, код.
 НЕ используй _ * [ ] ` в ответе.
 Слова: {wl}
 Формат:
@@ -396,6 +406,7 @@ def gen_grammar_lesson(title, level, short=False):
     if short:
         prompt = f"""Тема: "{title}" ({level}) — короткое повторение.
 Составь: 1) напоминание правила в 2-3 строках, 2) 3 упражнения с пропусками.
+Контекст примеров: Product Manager / Analyst, работа с продуктом и метриками.
 НЕ используй _ * [ ] `.
 Формат:
 Правило:
@@ -408,6 +419,7 @@ def gen_grammar_lesson(title, level, short=False):
     else:
         prompt = f"""Тема: "{title}" ({level}).
 Составь: 1) правило 5-7 строк с примерами, 2) 5 упражнений с пропусками.
+Контекст примеров: Product Manager / Analyst, работа с продуктом и метриками.
 НЕ используй _ * [ ] `.
 Формат:
 Правило:
@@ -421,9 +433,17 @@ def gen_grammar_lesson(title, level, short=False):
 
 def gen_reading(items):
     if not items:
-        items = [{"word": "algorithm — алгоритм"}]
+        items = [{"word": "retention — удержание"}]
     wl = ", ".join(w["word"].split(" — ")[0] for w in items)
-    prompt = f"""Write a short ENGLISH text (150-250 words, level B2-C1, IT topic).
+    prompt = f"""Write a short ENGLISH text (150-250 words, level B2-C1).
+Topic: Product Management / Product Analytics. Real PM/analyst work scenarios.
+Examples: launching a feature, investigating a churn spike, running an A/B test,
+prioritizing the backlog, talking to stakeholders, defining success metrics,
+discovery interviews, cohort analysis, pricing experiment, OKR planning,
+competitor analysis, roadmap trade-offs, feature adoption, NPS drop investigation,
+user segmentation, funnel optimization.
+Do NOT write about releases, deployments, CI/CD, DevOps, infrastructure, servers, or code.
+
 Include these words/phrases naturally: {wl}.
 
 Then write 3 comprehension questions IN ENGLISH.
@@ -436,20 +456,25 @@ Questions:
 2. ...
 3. ...
 
-IMPORTANT: The text and questions must be in ENGLISH only. No Russian.
-Do NOT use _ * [ ] ` in your answer."""
+IMPORTANT: English only. No Russian. No _ * [ ] ` in the answer."""
     return safe_ds(prompt)
 
 def gen_output_task(item):
     w = item["word"].split(" — ")[0]
-    prompt = f"""Give a short task (1-2 lines) asking the user to write a sentence with the word '{w}' in a work context.
-In Russian, since this is an instruction. No _ * [ ] `."""
-    return safe_ds(prompt) or f"Напиши своё предложение со словом: {w}"
+    prompt = f"""Напиши короткое задание (1-2 строки) на русском:
+попроси написать своё английское предложение со словом '{w}'
+в контексте работы Product Manager / Product Analyst
+(discovery, метрики, эксперименты, стейкхолдеры, роадмап, аналитика, интервью).
+НЕ используй _ * [ ] `."""
+    return safe_ds(prompt) or f"Напиши своё предложение со словом '{w}' в контексте работы Product Manager."
 
 def check_output(user_text, word):
-    prompt = f"""Пользователь написал своё предложение со словом '{word}':
+    prompt = f"""Пользователь (Product Manager / Analyst) написал предложение со словом '{word}':
 {user_text}
-Проверь грамматику и уместность. Если ок — похвали. Если ошибки — исправь.
+Проверь:
+1. Грамматику.
+2. Уместность слова в контексте PM/Analytics.
+Если всё ок — похвали. Если ошибки — исправь и предложи вариант получше.
 Макс 4 строки. НЕ используй _ * [ ] `."""
     return safe_ds(prompt) or "Ок."
 
@@ -468,6 +493,28 @@ def check_translation(user_text, correct):
 В САМОМ КОНЦЕ поставь [CORRECT] или [WRONG].
 НЕ используй _ * [ ] ` (кроме тега в конце)."""
     return safe_ds(prompt) or f"Правильно: {correct}\n[WRONG]"
+
+def gen_ru_and_en(word):
+    prompt = f"""Придумай 1 предложение на РУССКОМ языке с использованием '{word}'.
+Контекст: работа Product Manager / Product Analyst в IT.
+Типичные сценарии: discovery, A/B-тест, метрика (retention, DAU, churn, NPS, conversion),
+интервью с пользователем, приоритизация бэклога, роадмап, работа со стейкхолдерами,
+OKR, гипотеза, фаннел, когорта, юнит-экономика, сегментация.
+НЕ используй: релиз, деплой, CI/CD, инфраструктуру, DevOps, серверы, код.
+Затем дай правильный английский перевод этого предложения, ОБЯЗАТЕЛЬНО используя '{word}'.
+НЕ используй _ * [ ] `.
+Формат:
+RU: [русское предложение]
+EN: [английское предложение]"""
+    result = safe_ds(prompt) or ""
+    ru, en = "", ""
+    for line in result.split('\n'):
+        line = line.strip()
+        if line.startswith("RU:"):
+            ru = line[3:].strip()
+        elif line.startswith("EN:"):
+            en = line[3:].strip()
+    return ru, en
 
 # === КЛАВИАТУРЫ ===
 def main_kb():
@@ -528,7 +575,6 @@ def plan_kb():
         [InlineKeyboardButton("◀️ Назад", callback_data="menu_more")]
     ])
 
-# === /START ===
 async def start(update, context):
     uid = str(update.effective_user.id)
     if uid not in user_data:
@@ -541,7 +587,7 @@ async def start(update, context):
     due_main = len(due_items("main"))
     due_pv = len(due_items("phrasal"))
     due_g = len([g for g in grammar_topics if g.get("status") != "new" and is_due(g)])
-    text = ("🎓 Твой C1-тренер\n\n"
+    text = ("🎓 Твой C1-тренер (PM/Analytics)\n\n"
             f"🔥 Streak: {d.get('streak', 0)} дней\n"
             f"📥 Новых слов: {len([w for w in words if w['status']=='new'])}\n"
             f"🔤 Новых ФГ: {len([w for w in phrasal_verbs if w['status']=='new'])}\n"
@@ -555,7 +601,6 @@ async def start(update, context):
     else:
         await update.message.reply_text(text, reply_markup=main_kb())
 
-# === ДНЕВНАЯ СЕССИЯ ===
 async def session_start(update, context):
     q = update.callback_query
     uid = q.from_user.id
@@ -569,10 +614,18 @@ async def session_start(update, context):
     new_w_limit = max(0, plan["words"] - words_taken)
     new_p_limit = max(0, plan["phrasal"] - pv_taken)
 
-    due_w = due_items("main")
-    due_p = due_items("phrasal")
-    new_w = new_items("main", new_w_limit)
-    new_p = new_items("phrasal", new_p_limit)
+    DUE_LIMIT = 30
+    PH_MAX = 5
+
+    due_p_all = due_items("phrasal")
+    due_p = due_p_all[:PH_MAX]
+    due_w_all = due_items("main")
+    due_w = due_w_all[:DUE_LIMIT - len(due_p)]
+
+    new_w = new_items("main", new_w_limit) + stale_items("main")
+    new_p = new_items("phrasal", new_p_limit) + stale_items("phrasal")
+    new_w = new_w[:new_w_limit] if new_w_limit > 0 else []
+    new_p = new_p[:new_p_limit] if new_p_limit > 0 else []
 
     due_g = [g for g in grammar_topics if g.get("status") != "new" and is_due(g)]
     new_g = [g for g in grammar_topics if g.get("status") == "new"]
@@ -613,7 +666,12 @@ async def session_start(update, context):
         "waiting": False,
         "results": {"again": 0, "hard": 0, "good": 0, "easy": 0},
         "new_completed": {"main": 0, "phrasal": 0},
-        "new_total": {"main": len(new_w), "phrasal": len(new_p)}
+        "new_total": {"main": len(new_w), "phrasal": len(new_p)},
+        "new_practice_queue": [],
+        "new_practice_idx": 0,
+        "new_practice_step": "own",
+        "new_practice_ru": "",
+        "new_practice_en": ""
     }
 
     total = len(queue)
@@ -621,7 +679,7 @@ async def session_start(update, context):
     if grammar_item:
         grammar_label = grammar_item['title'] + (" (повтор)" if grammar_is_repeat else " (новая)")
     await q.message.reply_text(
-        f"☀️ Дневная сессия\n\n"
+        f"☀️ Дневная сессия (PM/Analytics)\n\n"
         f"🔄 Повторений (слова): {len(due_w)}\n"
         f"🔄 Повторений (ФГ): {len(due_p)}\n"
         f"➕ Новых слов: {len(new_w)}\n"
@@ -630,10 +688,22 @@ async def session_start(update, context):
         f"Всего SRS-карточек: {total}"
     )
     if total == 0:
-        sessions[uid]["phase"] = "grammar"
-        await session_grammar(update, uid)
+        await session_after_srs(update, uid)
         return
     await session_next(update, uid)
+
+async def session_after_srs(update, uid):
+    if uid not in sessions:
+        return
+    s = sessions[uid]
+    if s.get("new_practice_queue"):
+        s["phase"] = "new_practice"
+        s["new_practice_idx"] = 0
+        s["new_practice_step"] = "own"
+        await session_new_practice(update, uid)
+    else:
+        s["phase"] = "grammar"
+        await session_grammar(update, uid)
 
 async def session_next(update, uid):
     if uid not in sessions:
@@ -641,8 +711,7 @@ async def session_next(update, uid):
     s = sessions[uid]
     if s["phase"] == "srs":
         if s["idx"] >= len(s["queue"]):
-            s["phase"] = "grammar"
-            await session_grammar(update, uid)
+            await session_after_srs(update, uid)
             return
         item = s["queue"][s["idx"]]
         s["track"] = item["track"]
@@ -675,6 +744,9 @@ async def session_next(update, uid):
         )
         return
 
+    if s["phase"] == "new_practice":
+        await session_new_practice(update, uid)
+        return
     if s["phase"] == "grammar":
         await session_grammar(update, uid)
         return
@@ -686,6 +758,38 @@ async def session_next(update, uid):
         return
     if s["phase"] == "done":
         await session_finish(update, uid)
+        return
+
+async def session_new_practice(update, uid):
+    s = sessions[uid]
+    queue = s.get("new_practice_queue", [])
+    idx = s.get("new_practice_idx", 0)
+
+    if idx >= len(queue):
+        s["phase"] = "grammar"
+        await session_grammar(update, uid)
+        return
+
+    item = queue[idx]
+    step = s.get("new_practice_step", "own")
+    w = item["word"].split(" — ")[0]
+
+    if step == "own":
+        s["waiting"] = "new_own"
+        await update.effective_message.reply_text(
+            f"✍️ НОВЫЕ СЛОВА [{idx+1}/{len(queue)}] — {w}\n\n"
+            f"Напиши СВОЁ предложение на английском с этим словом "
+            f"в контексте работы Product Manager / Analyst:"
+        )
+        return
+
+    if step == "translate":
+        ru = s.get("new_practice_ru", "")
+        s["waiting"] = "new_translate"
+        await update.effective_message.reply_text(
+            f"✍️ НОВЫЕ СЛОВА [{idx+1}/{len(queue)}] — {w}\n\n"
+            f"Переведи на английский:\n\n{ru}"
+        )
         return
 
 async def session_grammar(update, uid):
@@ -714,7 +818,7 @@ async def session_reading(update, uid):
     s = sessions[uid]
     pool = [w for w in words if w["status"] in ("learning", "review")]
     if not pool:
-        pool = words[:5] if words else [{"word": "algorithm — алгоритм"}]
+        pool = words[:5] if words else [{"word": "retention — удержание"}]
     sel = random.sample(pool, min(5, len(pool)))
     msg = update.effective_message
     await msg.reply_text("⏳ Preparing reading text...")
@@ -727,7 +831,7 @@ async def session_reading(update, uid):
     s["waiting"] = "reading"
     for part in split_text(f"📖 Reading:\n\n{text}", 4000):
         await msg.reply_text(part)
-    await msg.reply_text("✍️ Answer the 3 questions in one message (English is preferred).")
+    await msg.reply_text("✍️ Answer the 3 questions in one message.")
 
 async def session_output(update, uid):
     s = sessions[uid]
@@ -753,11 +857,15 @@ async def session_finish(update, uid):
     if nc["phrasal"] > 0:
         inc_today(uid, "phrasal", nc["phrasal"])
 
+    np_done = s.get("new_practice_idx", 0)
+    np_total = len(s.get("new_practice_queue", []))
+
     text = (f"🎉 Дневная сессия завершена!\n\n"
             f"🔴 Again: {r['again']}\n"
             f"🟠 Hard: {r['hard']}\n"
             f"🟢 Good: {r['good']}\n"
             f"🔵 Easy: {r['easy']}\n\n"
+            f"📝 Практика новых слов: {np_done}/{np_total}\n"
             f"🔥 Streak: {user_data.get(str(uid), {}).get('streak', 0)}")
     del sessions[uid]
     await update.effective_message.reply_text(text, reply_markup=main_kb())
@@ -774,6 +882,37 @@ async def handle_session_answer(update, context):
         s["waiting"] = False
         kb = srs_kb(uid, s["idx"], item["track"])
         await update.message.reply_text("Оцени себя:", reply_markup=kb)
+        return
+
+    if s["waiting"] == "new_own":
+        item = s["new_practice_queue"][s["new_practice_idx"]]
+        w = item["word"].split(" — ")[0]
+        result = check_output(txt, w)
+        await update.message.reply_text(result)
+        ru, en = gen_ru_and_en(w)
+        if not ru:
+            s["new_practice_idx"] += 1
+            s["new_practice_step"] = "own"
+            s["waiting"] = False
+            await session_new_practice(update, uid)
+            return
+        s["new_practice_ru"] = ru
+        s["new_practice_en"] = en
+        s["new_practice_step"] = "translate"
+        s["waiting"] = False
+        await session_new_practice(update, uid)
+        return
+
+    if s["waiting"] == "new_translate":
+        correct_en = s.get("new_practice_en", "")
+        result = check_translation(txt, correct_en)
+        await update.message.reply_text(result)
+        s["new_practice_idx"] += 1
+        s["new_practice_step"] = "own"
+        s["new_practice_ru"] = ""
+        s["new_practice_en"] = ""
+        s["waiting"] = False
+        await session_new_practice(update, uid)
         return
 
     if s["waiting"] == "grammar":
@@ -809,7 +948,6 @@ async def handle_session_answer(update, context):
         await session_finish(update, uid)
         return
 
-# === SRS КНОПКИ ===
 async def handle_srs_button(update, context):
     q = update.callback_query
     data = q.data
@@ -873,6 +1011,7 @@ async def handle_srs_button(update, context):
             w_obj["saved_examples"] = [ex]
     if item.get("is_new") and q_val >= 3:
         s["new_completed"][track] = s["new_completed"].get(track, 0) + 1
+        s.setdefault("new_practice_queue", []).append(w_obj)
     save_track(track)
 
     key = {0: "again", 3: "hard", 4: "good", 5: "easy"}[q_val]
@@ -886,7 +1025,6 @@ async def handle_srs_button(update, context):
 
     await session_next(update, uid)
 
-# === ОБУЧЕНИЕ ===
 async def learn_start(update, context, track="main"):
     q = update.callback_query
     uid = q.from_user.id if q else update.effective_user.id
@@ -916,13 +1054,14 @@ async def learn_start(update, context, track="main"):
         "results": {"again": 0, "hard": 0, "good": 0, "easy": 0},
         "new_completed": {"main": 0, "phrasal": 0},
         "grammar_item": None, "grammar_is_repeat": False, "grammar_lesson": None,
-        "reading_text": None, "output_item": None
+        "reading_text": None, "output_item": None,
+        "new_practice_queue": [], "new_practice_idx": 0,
+        "new_practice_step": "own", "new_practice_ru": "", "new_practice_en": ""
     }
     target = q.message if q else update.message
     await target.reply_text(f"🧠 SRS-тренировка ({'ФГ' if track=='phrasal' else 'слова'}). {len(queue)} карточек.")
     await session_next(update, uid)
 
-# === ФРАЗОВЫЕ ГЛАГОЛЫ ===
 async def phrasal_daily(update, context):
     q = update.callback_query
     uid = q.from_user.id
@@ -949,7 +1088,6 @@ async def phrasal_daily(update, context):
         await q.message.reply_text(p)
     await q.message.reply_text("Дальше: /learn_phrasal или кнопка Учить ФГ", reply_markup=main_kb())
 
-# === ГРАММАТИКА ===
 async def grammar_new(update, context):
     q = update.callback_query
     uid = q.from_user.id if q else update.effective_user.id
@@ -1047,13 +1185,12 @@ async def grammar_retry(update, context):
         await q.message.reply_text(p)
     await q.message.reply_text("✍️ Ответь одним сообщением.")
 
-# === ЧТЕНИЕ ===
 async def reading_start(update, context):
     q = update.callback_query
     uid = q.from_user.id
     pool = [w for w in words if w["status"] in ("learning", "review")]
     if not pool:
-        pool = words[:5] if words else [{"word": "algorithm — алгоритм"}]
+        pool = words[:5] if words else [{"word": "retention — удержание"}]
     sel = random.sample(pool, min(5, len(pool)))
     await q.message.reply_text("⏳ Preparing text...")
     text = gen_reading(sel)
@@ -1072,7 +1209,6 @@ async def handle_reading_answer(update, context):
     await update.message.reply_text(result or "Ок.")
     del sessions[uid]
 
-# === OUTPUT ===
 async def output_start(update, context):
     q = update.callback_query
     uid = q.from_user.id
@@ -1093,7 +1229,6 @@ async def handle_output_answer(update, context):
     await update.message.reply_text(result, reply_markup=main_kb())
     del sessions[uid]
 
-# === ПРОГРЕСС ===
 async def progress_menu(update, context):
     q = update.callback_query
     uid = str(q.from_user.id)
@@ -1134,7 +1269,6 @@ async def daily_progress(update, context):
         text += f"{k}: выучено {counts[k]}\n"
     await q.edit_message_text(text, reply_markup=more_kb())
 
-# === LEECHES ===
 async def leeches(update, context):
     q = update.callback_query
     uid = q.from_user.id
@@ -1168,7 +1302,6 @@ async def mnemonic(update, context):
     mn = gen_mnemonic(en, ru)
     await q.message.reply_text(f"🩸 {w['word']}\n\n🧠 {mn}")
 
-# === НЕДЕЛЬНЫЙ ТЕСТ ===
 async def weekly_test(update, context):
     q = update.callback_query
     uid = q.from_user.id
@@ -1203,7 +1336,6 @@ async def handle_weekly_answer(update, context):
     s["idx"] += 1
     await weekly_next(update, uid)
 
-# === SPEAKING ===
 async def speaking(update, context):
     q = update.callback_query
     uid = q.from_user.id
@@ -1213,7 +1345,7 @@ async def speaking(update, context):
             reply_markup=more_kb()
         )
         return
-    prompt = "Tell me about a time you had to pivot at work. Speak 1-2 minutes."
+    prompt = "Tell me about a time you had to pivot a product strategy at work. Speak 1-2 minutes."
     sessions[uid] = {"mode": "speaking_prompt"}
     await q.message.reply_text(f"🎙️ {prompt}\n\nЗапиши голосовое.")
 
@@ -1242,11 +1374,10 @@ async def handle_voice(update, context):
             os.remove(path)
         except:
             pass
-    feedback = safe_ds(f"Студент сказал:\n{transcript}\n\nОцени беглость, грамматику, лексику. Макс 6 строк. НЕ используй _ * [ ] `.")
+    feedback = safe_ds(f"Студент (Product Manager/Analyst) сказал:\n{transcript}\n\nОцени беглость, грамматику, лексику. Макс 6 строк. НЕ используй _ * [ ] `.")
     await update.message.reply_text(f"📝 Расшифровка:\n{transcript}\n\n🎯 Оценка:\n{feedback or 'Ок'}")
     del sessions[uid]
 
-# === ПЛАН ===
 async def plan_menu(update, context):
     q = update.callback_query
     uid = str(q.from_user.id)
@@ -1268,7 +1399,6 @@ async def plan_set(update, context):
     save_json(USER_DATA_FILE, user_data)
     await q.edit_message_text(f"✅ План: {w} слов, {p} ФГ, {g} грамматика.", reply_markup=main_kb())
 
-# === CLOZE / DIALOGUE ===
 async def practice_cloze(update, context):
     q = update.callback_query
     uid = q.from_user.id
@@ -1278,7 +1408,7 @@ async def practice_cloze(update, context):
         return
     sel = random.sample(pool, min(5, len(pool)))
     wl = ", ".join(w["word"].split(" — ")[0] for w in sel)
-    cloze = safe_ds(f"Составь 3 предложения с пропусками. Используй: {wl}. После — перевод. НЕ используй _ * [ ] `.") or "Ошибка"
+    cloze = safe_ds(f"Составь 3 предложения с пропусками в контексте PM/Analytics. Используй: {wl}. После — перевод. НЕ используй _ * [ ] `.") or "Ошибка"
     sessions[uid] = {"mode": "practice_cloze", "lesson": cloze}
     for p in split_text(f"📝 Cloze:\n\n{cloze}", 4000):
         await q.message.reply_text(p)
@@ -1292,11 +1422,10 @@ async def dialogue_start(update, context):
         return
     sel = random.sample(pool, min(10, len(pool)))
     wl = ", ".join(w["word"].split(" — ")[0] for w in sel)
-    dlg = safe_ds(f"Диалог на английском (6-8 реплик) с: {wl}. После перевод. НЕ используй _ * [ ] `.") or "Ошибка"
+    dlg = safe_ds(f"Диалог на английском (6-8 реплик) между PM и аналитиком, с: {wl}. После перевод. НЕ используй _ * [ ] `.") or "Ошибка"
     for p in split_text(f"🗣️ Диалог:\n\n{dlg}", 4000):
         await q.message.reply_text(p)
 
-# === СТАТУС/СБРОС ===
 async def set_status_cmd(update, context):
     m = re.search(r'/status\s+(.+?)\s+[-—]\s+(\w+)', update.message.text, re.IGNORECASE)
     if not m:
@@ -1352,7 +1481,6 @@ async def toggle_sub(update, context):
     save_json(USER_DATA_FILE, user_data)
     await update.message.reply_text("✅ Вкл" if on else "❌ Выкл", reply_markup=main_kb())
 
-# === ДЕТЕКТОРЫ ===
 def detect_add(text):
     m = re.search(r'^\+ (.+?)\s*[-—]\s*(.+)$', text.strip())
     if m:
@@ -1368,7 +1496,6 @@ def detect_pv_add(text):
         return (m.group(1).strip(), m.group(2).strip())
     return None
 
-# === ГЛАВНЫЙ HANDLE ===
 async def handle(update, context):
     if update.message.voice:
         return await handle_voice(update, context)
@@ -1436,10 +1563,9 @@ async def handle(update, context):
         await update.message.reply_text(r, reply_markup=main_kb())
         return
 
-    r = safe_ds(text, system="Ты репетитор английского для IT. Не используй _ * [ ] `.")
+    r = safe_ds(text, system="Ты репетитор английского для Product Manager / Analyst в IT. Не используй _ * [ ] `.")
     await update.message.reply_text(r or "Ошибка.", reply_markup=main_kb())
 
-# === РАССЫЛКА ===
 async def send_daily_tasks():
     bot = Bot(token=os.environ.get('TELEGRAM_BOT_TOKEN'))
     users = load_json(USER_DATA_FILE, {})
@@ -1457,7 +1583,6 @@ async def send_daily_tasks():
         except Exception as e:
             logging.error(e)
 
-# === КНОПКИ ===
 async def button_handler(update, context):
     q = update.callback_query
     data = q.data
@@ -1553,7 +1678,6 @@ async def button_handler(update, context):
 
     await q.answer()
 
-# === ЗАПУСК ===
 async def post_init(application):
     scheduler.start()
 
@@ -1583,7 +1707,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
     scheduler.add_job(send_daily_tasks, CronTrigger(hour=9, minute=0), id='daily')
-    print("✅ Бот запущен (C1 + SRS, финальная версия + grammar repeat)!")
+    print("✅ Бот запущен (PM/Analytics, сводная версия)!")
     app.run_polling()
 
 async def daily_words_compat(update, context, track):
@@ -1609,7 +1733,7 @@ async def daily_words_compat(update, context, track):
         await q_msg.reply_text(p)
 
 async def reading_start_compat(update, context):
-    pool = [w for w in words if w["status"] in ("learning", "review")] or (words[:5] if words else [{"word": "algorithm — алгоритм"}])
+    pool = [w for w in words if w["status"] in ("learning", "review")] or (words[:5] if words else [{"word": "retention — удержание"}])
     sel = random.sample(pool, min(5, len(pool)))
     text = gen_reading(sel)
     if not text:
